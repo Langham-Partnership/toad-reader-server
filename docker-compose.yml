@@ -63,6 +63,7 @@ services:
     volumes:
       - ./app.js:/app/app.js
       - ./src:/app/src
+      - ./scripts:/app/scripts
       - linux-private-ca-certificates:/usr/local/share/ca-certificates
     init: true
     environment:

@@ -34,6 +34,7 @@ if (process.env.S3_ACCESS_KEY_ID && process.env.S3_SECRET_ACCESS_KEY) {
   };
 }
 if (process.env.USE_DEVELOPMENT_S3) {
+  s3Config.region = 'minio';
   s3Config.endpoint = process.env.S3_ENDPOINT;
   s3Config.forcePathStyle = true;
 }
