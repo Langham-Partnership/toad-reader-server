@@ -668,7 +668,7 @@ module.exports = function (
 
                   global.connection.query(
                     `INSERT INTO classroom SET ?`,
-                    defaultClassroom,
+                    [defaultClassroom],
                     (err) => {
                       if (err) return next(err);
 

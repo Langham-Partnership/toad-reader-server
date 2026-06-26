@@ -2,6 +2,8 @@
 
 ARG ALPINE_VERSION=3.21
 ARG NODE_VERSION=20
+ARG DEBIAN_VERSION=13
+ARG RUNTIME_NODE_TAG=nonroot
 
 ##########################
 # Cache-preserving image #
@@ -40,18 +42,19 @@ COPY package.json .
 # Development image #
 #####################
 
-# TODO switch to gcr.io/distroless after we upgrade to Node.js 18 (see ereader-callback Dockerfile)
-FROM node:${NODE_VERSION}-slim AS development
+FROM gcr.io/distroless/nodejs${NODE_VERSION}-debian${DEBIAN_VERSION}:${RUNTIME_NODE_TAG} AS development
 
 ARG AUTHOR
 ARG DATETIMENOW
 ARG REVISION
+ARG NODE_VERSION
+ARG DEBIAN_VERSION
 ARG RUNTIME_NODE_TAG
 ARG TAG_VERSION_NUMBER
 
 # https://github.com/opencontainers/image-spec/blob/main/annotations.md
 LABEL org.opencontainers.image.authors=${AUTHOR} \
-  org.opencontainers.image.base.name="node:${NODE_VERSION}-slim" \
+  org.opencontainers.image.base.name="gcr.io/distroless/nodejs${NODE_VERSION}-debian${DEBIAN_VERSION}:${RUNTIME_NODE_TAG}" \
   org.opencontainers.image.created=${DATETIMENOW} \
   org.opencontainers.image.description="eReader" \
   org.opencontainers.image.source="https://github.com/biblemesh/toad-reader-server" \
@@ -66,6 +69,6 @@ COPY ./ ./
 COPY --from=builder /app/node_modules ./node_modules
 
 HEALTHCHECK --interval=60s --timeout=10s --start-period=10s \
-   CMD ["node", "./healthcheck.js"]
+   CMD ["/nodejs/bin/node", "./healthcheck.js"]
 
-CMD ["npm", "start"]
+CMD ["--expose-gc", "./app.js"]

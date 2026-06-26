@@ -1,3 +1,4 @@
+const awsCaBundle = require('aws-ssl-profiles');
 const moment = require('moment');
 const jwt = require('jsonwebtoken');
 const fetch = require('node-fetch');
@@ -17,8 +18,8 @@ const md5 = require('md5');
 const useragent = require('useragent');
 const session = require('express-session');
 const MySQLStore = require('express-mysql-session')(session);
-const mysql = require('mysql');
-const SqlString = require('mysql/lib/protocol/SqlString');
+const mysql = require('mysql2');
+const SqlString = require('sqlstring');
 const { log } = require('./logger');
 
 const getShopifyUserInfo = require('./getShopifyUserInfo');
@@ -33,19 +34,11 @@ if (process.env.S3_ACCESS_KEY_ID && process.env.S3_SECRET_ACCESS_KEY) {
   };
 }
 if (process.env.USE_DEVELOPMENT_S3) {
+  s3Config.region = 'minio';
   s3Config.endpoint = process.env.S3_ENDPOINT;
   s3Config.forcePathStyle = true;
 }
 const s3 = new S3Client(s3Config);
-
-const mySqlSessionOptions = {
-  host: process.env.OVERRIDE_DATABASE_HOSTNAME || process.env.DATABASE_HOSTNAME,
-  port: process.env.OVERRIDE_DATABASE_PORT || process.env.DATABASE_PORT,
-  user: process.env.OVERRIDE_DATABASE_USERNAME || process.env.DATABASE_USERNAME,
-  password:
-    process.env.OVERRIDE_DATABASE_PASSWORD || process.env.DATABASE_PASSWORD,
-  database: process.env.OVERRIDE_DATABASE_NAME || process.env.DATABASE_NAME,
-};
 
 var getXapiActor = function (params) {
   return {
@@ -150,8 +143,7 @@ const jsonCols = {
 
 const openConnection = () => {
   log([`Establish connection pool`]);
-
-  global.connection = mysql.createPool({
+  const connectionOptions = {
     host:
       process.env.OVERRIDE_DATABASE_HOSTNAME || process.env.DATABASE_HOSTNAME,
     port: process.env.OVERRIDE_DATABASE_PORT || process.env.DATABASE_PORT,
@@ -161,6 +153,7 @@ const openConnection = () => {
       process.env.OVERRIDE_DATABASE_PASSWORD || process.env.DATABASE_PASSWORD,
     database: process.env.OVERRIDE_DATABASE_NAME || process.env.DATABASE_NAME,
     multipleStatements: true,
+    namedPlaceholders: true,
     dateStrings: true,
     charset: 'utf8mb4',
     queryFormat: function (query, values) {
@@ -183,21 +176,13 @@ const openConnection = () => {
       }
     },
     // debug: true,
-  });
+  };
 
-  // It seems that when a lambda instance is connected too long, and so its db connection
-  // exceeds 8 hours, that the connection times out and all queries fail. To prevent this,
-  // we are using connection pooling and closing all the connections every hour. (This timeout
-  // should only actually fire if the lambda instance persists over an hour.)
-  // See https://stackoverflow.com/questions/70645884/error-packets-out-of-order-got-0-expected-3
-  setTimeout(
-    () => {
-      log([`Close connection pool`]);
-      global.connection.end();
-      delete global.connection;
-    },
-    1000 * 60 * 60,
-  );
+  if (process.env.USE_RDS_CERTIFICATE_BUNDLE === 'true') {
+    connectionOptions.ssl = awsCaBundle;
+  }
+
+  global.connection = mysql.createPool(connectionOptions);
 
   return global.connection;
 };
@@ -222,7 +207,7 @@ const util = {
 
   session,
 
-  sessionStore: new MySQLStore(mySqlSessionOptions),
+  sessionStore: new MySQLStore({}, openConnection().promise()),
 
   getUTCTimeStamp: function () {
     return new Date().getTime();
@@ -1512,11 +1497,13 @@ const util = {
 
           global.connection.query(
             modificationQueries.join('; '),
-            {
-              idpId,
-              userId,
-              bookId,
-            },
+            [
+              {
+                idpId,
+                userId,
+                bookId,
+              },
+            ],
             (err) => {
               if (err) throw err;
               resolve();
@@ -2122,27 +2109,6 @@ const util = {
 
   openConnection,
 
-  getValidConnection: async () => {
-    // Connect to DB if not already connected
-
-    if (global.connection) {
-      try {
-        await global.connection.query(`SELECT 1`); // test the connection
-      } catch (err) {
-        console.error(
-          `Connection was present, but not working. Attempting to delete and re-establish it.`,
-          err,
-        );
-        delete global.connection;
-      }
-    }
-
-    if (!global.connection) {
-      openConnection();
-    }
-
-    return global.connection;
-  },
   S3Client,
   GetObjectCommand,
   PutObjectCommand,
