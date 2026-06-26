@@ -4,7 +4,7 @@
   "description": "Toad Reader server",
   "author": "Andy Hubert",
   "scripts": {
-    "ci:build": "docker build . --target development $CACHE_ARGS --build-arg NODE_VERSION=$NODE_VERSION $DOCKER_TAGS $EXTRA_ARGS",
+    "ci:build": "docker buildx build . --target development $CACHE_ARGS --build-arg NODE_VERSION=$NODE_VERSION $DOCKER_TAGS $EXTRA_ARGS",
     "ci:lint": "npm run lint",
     "ci:test": "npm run test",
     "confirm": "read -p 'Are you sure? ' -n 1 -r && echo '\n' && [[ $REPLY =~ ^[Yy]$ ]]",
