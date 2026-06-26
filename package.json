@@ -38,6 +38,8 @@
     "@aws-sdk/client-s3": "3.984.0",
     "@aws-sdk/client-ses": "3.984.0",
     "@aws-sdk/cloudfront-signer": "3.978.0",
+    "@fontsource/montserrat": "^5.2.8",
+    "@fontsource/open-sans": "^5.2.7",
     "@node-saml/passport-saml": "^5.1.0",
     "@sentry/node": "^8.55.0",
     "@sentry/profiling-node": "^8.55.0",
