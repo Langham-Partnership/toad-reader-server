@@ -1,3 +1,4 @@
+const Sentry = require('@sentry/node');
 const awsCaBundle = require('aws-ssl-profiles');
 const moment = require('moment');
 const jwt = require('jsonwebtoken');
@@ -20,7 +21,7 @@ const session = require('express-session');
 const MySQLStore = require('express-mysql-session')(session);
 const mysql = require('mysql2');
 const SqlString = require('sqlstring');
-const { log } = require('./logger');
+const { log, logLevel } = require('./logger');
 
 const getShopifyUserInfo = require('./getShopifyUserInfo');
 
@@ -1621,15 +1622,33 @@ const util = {
 
   runQuery: ({ query, queries, vars, next }) =>
     new Promise((resolve) => {
-      const { sql } = global.connection.query(
-        query || queries.join(';'),
+      /** @type mysql.Pool */
+      const connection = global.connection;
+      query = query ?? queries.join(';');
+      const { sql } = connection.query(
+        query,
         // The following did not seem to work
         // {
-        //   sql: query || queries.join(';'),
+        //   sql: query,
         //   timeout: 1000 * 10,
         // },
         vars,
         (err, result) => {
+          if (err || logLevel <= 1) {
+            // verbose
+            Sentry.addBreadcrumb({
+              type: 'query',
+              category: 'query',
+              message: query,
+              level: 'info',
+              data: {
+                'db.statement': query,
+                'db.params': vars,
+                'db.error': err,
+                'db.result': result,
+              },
+            });
+          }
           if (err) {
             next(err);
             resolve();
