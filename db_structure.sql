@@ -37,7 +37,7 @@ CREATE TABLE `book` (
   PRIMARY KEY (`id`),
   KEY `rootUrl` (`rootUrl`),
   KEY `isbn` (`isbn`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 
 
@@ -81,7 +81,7 @@ CREATE TABLE `book_instance` (
   KEY `version` (`version`),
   KEY `expires_at` (`expires_at`),
   KEY `enhanced_tools_expire_at` (`enhanced_tools_expire_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
 
@@ -126,7 +126,7 @@ CREATE TABLE `book-idp` (
   `link_href` text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin,
   `link_label` text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin,
   PRIMARY KEY (`book_id`,`idp_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 
 
@@ -265,7 +265,7 @@ CREATE TABLE `computed_book_access` (
   KEY `expires_at` (`expires_at`),
   KEY `enhanced_tools_expire_at` (`enhanced_tools_expire_at`),
   KEY `idp_id_3` (`idp_id`,`book_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
 
@@ -276,7 +276,7 @@ CREATE TABLE `embed_website` (
   `domain` varchar(253) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
   `idp_id` int unsigned NOT NULL,
   PRIMARY KEY (`domain`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
 
@@ -304,7 +304,7 @@ CREATE TABLE `highlight` (
   KEY `updated_at` (`updated_at`),
   KEY `user_id_2` (`user_id`),
   KEY `share_code` (`share_code`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 
 
@@ -313,45 +313,45 @@ CREATE TABLE `highlight` (
 
 CREATE TABLE `idp` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
-  `name` text CHARACTER SET utf8 COLLATE utf8_bin NOT NULL,
-  `domain` varchar(253) CHARACTER SET utf8 COLLATE utf8_bin NOT NULL DEFAULT '',
-  `contactEmail` text COLLATE utf8_bin,
+  `name` text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  `domain` varchar(253) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
+  `contactEmail` text COLLATE utf8mb4_bin,
   `use_enhanced_reader_at` datetime(3) DEFAULT NULL,
   `use_audiobooks_at` datetime(3) DEFAULT NULL,
-  `specialPricing` enum('OLD','NON-PROFIT','ORIG-ORCA') CHARACTER SET utf8 COLLATE utf8_bin DEFAULT NULL,
-  `fromEmail` text CHARACTER SET utf8 COLLATE utf8_general_ci,
-  `authMethod` enum('SESSION_SHARING','SHIBBOLETH','EMAIL','NONE_OR_EMAIL') CHARACTER SET utf8 COLLATE utf8_bin NOT NULL DEFAULT 'NONE_OR_EMAIL',
-  `sessionSharingAsRecipientInfo` text CHARACTER SET utf8 COLLATE utf8_bin,
-  `entryPoint` text CHARACTER SET utf8 COLLATE utf8_bin,
-  `logoutUrl` text CHARACTER SET utf8 COLLATE utf8_bin,
-  `nameQualifier` varchar(100) CHARACTER SET utf8 COLLATE utf8_bin DEFAULT '',
-  `idpcert` text CHARACTER SET utf8 COLLATE utf8_bin,
-  `spcert` text CHARACTER SET utf8 COLLATE utf8_bin,
-  `spkey` text CHARACTER SET utf8 COLLATE utf8_bin,
-  `internalJWT` text CHARACTER SET utf8 COLLATE utf8_bin,
-  `userInfoEndpoint` varchar(255) CHARACTER SET utf8 COLLATE utf8_bin DEFAULT NULL,
-  `userInfoJWT` text CHARACTER SET utf8 COLLATE utf8_bin,
-  `actionEndpoint` text CHARACTER SET utf8 COLLATE utf8_bin,
-  `androidAppURL` text CHARACTER SET utf8 COLLATE utf8_bin,
-  `iosAppURL` text CHARACTER SET utf8 COLLATE utf8_bin,
+  `specialPricing` enum('OLD','NON-PROFIT','ORIG-ORCA') CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL,
+  `fromEmail` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci,
+  `authMethod` enum('SESSION_SHARING','SHIBBOLETH','EMAIL','NONE_OR_EMAIL') CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT 'NONE_OR_EMAIL',
+  `sessionSharingAsRecipientInfo` text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin,
+  `entryPoint` text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin,
+  `logoutUrl` text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin,
+  `nameQualifier` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT '',
+  `idpcert` text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin,
+  `spcert` text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin,
+  `spkey` text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin,
+  `internalJWT` text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin,
+  `userInfoEndpoint` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL,
+  `userInfoJWT` text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin,
+  `actionEndpoint` text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin,
+  `androidAppURL` text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin,
+  `iosAppURL` text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin,
   `xapiOn` tinyint(1) NOT NULL DEFAULT '0',
-  `xapiEndpoint` text CHARACTER SET utf8 COLLATE utf8_bin,
-  `xapiUsername` text CHARACTER SET utf8 COLLATE utf8_bin,
-  `xapiPassword` text CHARACTER SET utf8 COLLATE utf8_bin,
+  `xapiEndpoint` text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin,
+  `xapiUsername` text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin,
+  `xapiPassword` text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin,
   `xapiMaxBatchSize` int DEFAULT NULL,
   `readingSessionsOn` tinyint(1) NOT NULL DEFAULT '1',
-  `consentText` text CHARACTER SET utf8 COLLATE utf8_bin,
-  `amplitudeSecretKey` text CHARACTER SET utf8 COLLATE utf8_bin,
+  `consentText` text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin,
+  `amplitudeSecretKey` text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin,
   `maxMBPerBook` int NOT NULL DEFAULT '20',
   `maxMBPerFile` int NOT NULL DEFAULT '15',
-  `googleAnalyticsCode` text CHARACTER SET utf8 COLLATE utf8_bin,
-  `language` varchar(5) CHARACTER SET utf8 COLLATE utf8_bin DEFAULT NULL,
+  `googleAnalyticsCode` text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin,
+  `language` varchar(5) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL,
   `created_at` datetime(3) NOT NULL,
   `demo_expires_at` datetime(3) DEFAULT NULL,
   `deviceLoginLimit` int DEFAULT NULL,
-  `emailBGColor` varchar(30) COLLATE utf8_bin DEFAULT NULL,
-  `emailInnerBGColor` varchar(30) COLLATE utf8_bin DEFAULT NULL,
-  `emailLogoUrl` text COLLATE utf8_bin,
+  `emailBGColor` varchar(30) COLLATE utf8mb4_bin DEFAULT NULL,
+  `emailInnerBGColor` varchar(30) COLLATE utf8mb4_bin DEFAULT NULL,
+  `emailLogoUrl` text COLLATE utf8mb4_bin,
   `emailHideName` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`),
   UNIQUE KEY `domain` (`domain`),
@@ -359,7 +359,7 @@ CREATE TABLE `idp` (
   KEY `demo_expires_at` (`demo_expires_at`),
   KEY `xapiOn` (`xapiOn`),
   KEY `readingSessionsOn` (`readingSessionsOn`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 
 
@@ -372,7 +372,7 @@ CREATE TABLE `idp_group_member` (
   PRIMARY KEY (`idp_id`,`idp_group_id`),
   KEY `idp_id` (`idp_id`),
   KEY `idp_group_id` (`idp_group_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
 
@@ -401,7 +401,7 @@ CREATE TABLE `latest_location` (
   `updated_at` datetime(3) NOT NULL,
   PRIMARY KEY (`user_id`,`book_id`),
   KEY `user_id` (`user_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 
 
@@ -509,7 +509,7 @@ CREATE TABLE `subscription_instance` (
   KEY `expires_at` (`expires_at`),
   KEY `enhanced_tools_expire_at` (`enhanced_tools_expire_at`),
   KEY `subscription_id_2` (`subscription_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
 
@@ -524,7 +524,7 @@ CREATE TABLE `subscription-book` (
   KEY `subscription_id` (`subscription_id`),
   KEY `book_id` (`book_id`),
   KEY `version` (`version`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
 
@@ -615,14 +615,14 @@ CREATE TABLE `tool_engagement_answer` (
 
 CREATE TABLE `user` (
   `id` int NOT NULL AUTO_INCREMENT,
-  `user_id_from_idp` varchar(255) CHARACTER SET utf8 COLLATE utf8_unicode_ci NOT NULL DEFAULT '',
+  `user_id_from_idp` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '',
   `idp_id` int unsigned NOT NULL,
   `email` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '',
   `fullname` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '',
   `adminLevel` enum('NONE','ADMIN','SUPER_ADMIN') CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT 'NONE',
   `created_at` datetime(3) NOT NULL,
   `last_login_at` datetime(3) NOT NULL,
-  `last_login_platform` varchar(255) COLLATE utf8_unicode_ci DEFAULT NULL,
+  `last_login_platform` varchar(255) COLLATE utf8mb4_0900_ai_ci DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `user_id_from_idp` (`user_id_from_idp`,`idp_id`),
   KEY `email` (`email`),
@@ -632,7 +632,7 @@ CREATE TABLE `user` (
   KEY `created_at` (`created_at`),
   KEY `last_login_at` (`last_login_at`),
   KEY `last_login_platform` (`last_login_platform`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
 
@@ -649,7 +649,7 @@ CREATE TABLE `xapiQueue` (
   UNIQUE KEY `unique_tag` (`unique_tag`),
   KEY `idp_id` (`idp_id`),
   KEY `created_at` (`created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
 
