@@ -57,10 +57,10 @@ LABEL org.opencontainers.image.authors=${AUTHOR} \
   org.opencontainers.image.base.name="gcr.io/distroless/nodejs${NODE_VERSION}-debian${DEBIAN_VERSION}:${RUNTIME_NODE_TAG}" \
   org.opencontainers.image.created=${DATETIMENOW} \
   org.opencontainers.image.description="eReader" \
-  org.opencontainers.image.source="https://github.com/biblemesh/toad-reader-server" \
+  org.opencontainers.image.source="https://github.com/Langham-Partnership/toad-reader-server" \
   org.opencontainers.image.revision=${REVISION:-unspecified} \
-  org.opencontainers.image.title="biblemesh/toad-reader-server" \
-  org.opencontainers.image.vendor="BI Ltd" \
+  org.opencontainers.image.title="Langham-Partnership/toad-reader-server" \
+  org.opencontainers.image.vendor="Langham Partnership" \
   org.opencontainers.image.version=${TAG_VERSION_NUMBER}
 
 WORKDIR /app
