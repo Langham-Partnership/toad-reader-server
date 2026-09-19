@@ -5,7 +5,7 @@ on:
 
   push:
     branches:
-      - bm-develop
+      - dev
 
 permissions:
   contents: read
@@ -58,7 +58,7 @@ jobs:
             # org.opencontainers.image.vendor=BI Ltd
           sep-annotations: ' --annotation '
           tags: |
-            type=edge,branch=bm-develop
+            type=edge,branch=dev
             type=ref,event=branch
             type=ref,event=pr
             type=sha
@@ -103,5 +103,5 @@ jobs:
         env:
           GITHASH: ${{ github.sha }}
           GITHUB_REPO: ${{ github.repository }}
-          BASE_BRANCH: ${{ github.base_ref || 'bm-develop' }}
+          BASE_BRANCH: ${{ github.base_ref || 'dev' }}
           NODE_VERSION: ${{ matrix.node-version }}

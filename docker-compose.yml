@@ -50,7 +50,7 @@ services:
       retries: 6
 
   reader:
-    image: ghcr.io/biblemesh/toad-reader-server:bm-develop
+    image: ghcr.io/biblemesh/toad-reader-server:dev
     depends_on:
       certificate-trust:
         condition: service_completed_successfully
