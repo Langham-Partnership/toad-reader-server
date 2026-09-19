@@ -69,10 +69,10 @@ ARG REVISION
 # https://github.com/opencontainers/image-spec/blob/main/annotations.md
 LABEL org.opencontainers.image.authors=${AUTHOR} \
   org.opencontainers.image.created=${DATETIMENOW} \
-  org.opencontainers.image.source="https://github.com/biblemesh/toad-reader-server" \
+  org.opencontainers.image.source="https://github.com/Langham-Partnership/toad-reader-server" \
   org.opencontainers.image.revision=${REVISION:-unspecified} \
-  org.opencontainers.image.title="biblemesh/toad-reader-server" \
-  org.opencontainers.image.vendor="BI Ltd" \
+  org.opencontainers.image.title="Langham-Partnership/toad-reader-server" \
+  org.opencontainers.image.vendor="Langham Partnership" \
   org.opencontainers.image.version=${EREADER_VERSION}
 
 COPY --from=build /app/node_modules ./node_modules/

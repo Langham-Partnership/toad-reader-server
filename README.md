@@ -2,8 +2,8 @@
 
 1. Copy .env-example to .env (this should work without modification)
 1. Populate other .env files from the other repos:
-   - `.env.callback` from [ereader-callback](biblemesh/ereader-callback) (`.env.dist`)
-   - `.env.shibboleth` from [shibboleth](biblemesh/shibboleth) (`shibboleth-common/.env.dist`)
+   - `.env.callback` from [ereader-callback](Langham-Partnership/ereader-callback) (`.env.dist`)
+   - `.env.shibboleth` from [shibboleth](Langham-Partnership/shibboleth) (`shibboleth-common/.env.dist`)
 1. Log into GitHub Packages using one of the following
 
    1. Using Personal Access Token
@@ -27,7 +27,7 @@ A file called `proxy.pac` is generated and hosted by Caddy, to simplify connecti
 
     https://localhost:3128/proxy.pac
 
-You will also need to add the `rootCA.crt` root certificate to your OS or browser's certificates manager. This certificate is available inside the `biblemesh/shibboleth-common:1.0.0-dev` Docker image, after this has been built.
+You will also need to add the `rootCA.crt` root certificate to your OS or browser's certificates manager. This certificate is available inside the `Langham-Partnership/shibboleth-common:1.0.0-dev` Docker image, after this has been built.
 
 # Installation (standalone server, dev mode)
 

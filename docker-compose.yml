@@ -3,7 +3,7 @@ networks:
 
 services:
   mysql_init:
-    image: biblemesh/shibboleth-common:1.0.0-dev
+    image: Langham-Partnership/shibboleth-common:1.0.0-dev
     depends_on:
       - common
     build:
@@ -50,7 +50,7 @@ services:
       retries: 6
 
   reader:
-    image: ghcr.io/biblemesh/toad-reader-server:dev
+    image: ghcr.io/Langham-Partnership/toad-reader-server:dev
     depends_on:
       certificate-trust:
         condition: service_completed_successfully
@@ -142,9 +142,9 @@ services:
       '
 
 include:
-  - path: git@github.com:biblemesh/ereader-callback.git#main
+  - path: git@github.com:Langham-Partnership/ereader-callback.git#main
     env_file: .env.callback
-  - path: git@github.com:biblemesh/shibboleth.git#main
+  - path: git@github.com:Langham-Partnership/shibboleth.git#main
     env_file: .env.shibboleth
 
 volumes:

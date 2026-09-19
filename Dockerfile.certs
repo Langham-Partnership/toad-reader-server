@@ -1,4 +1,4 @@
-FROM ghcr.io/biblemesh/shibboleth-common:latest AS shibboleth-common
+FROM ghcr.io/Langham-Partnership/shibboleth-common:latest AS shibboleth-common
 
 FROM alpine:3.21
 RUN apk --no-cache add envsubst
