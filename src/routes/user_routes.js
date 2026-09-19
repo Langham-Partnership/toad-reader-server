@@ -136,6 +136,22 @@ module.exports = function (
     }
 
     log('Deliver share page');
+    res.set({
+      'Content-Security-Policy': [
+        "default-src 'self'",
+        "style-src 'self'",
+        "script-src 'self'",
+        "font-src 'self'",
+        `img-src 'self' data: ${frontendBaseUrl}`,
+        "connect-src 'none'",
+        "frame-ancestors 'none'",
+        "form-action 'none'",
+        "base-uri 'self'",
+      ].join('; '),
+      'Referrer-Policy': 'no-referrer',
+      'X-Frame-Options': 'DENY',
+      'X-Content-Type-Options': 'nosniff',
+    });
     res.send(sharePage);
   };
 

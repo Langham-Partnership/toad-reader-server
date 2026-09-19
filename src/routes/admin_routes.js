@@ -34,134 +34,629 @@ if (baseTmpDir) {
   baseTmpDir = `${baseTmpDir}/`;
 }
 
-module.exports = function (app, ensureAuthenticatedAndCheckIDP) {
-  const deleteFolderRecursive = (path) => {
-    log(['Delete folder', path], 2);
-    if (fs.existsSync(path)) {
-      fs.readdirSync(path).forEach((file) => {
-        const curPath = `${path}/${file}`;
-        if (fs.lstatSync(curPath).isDirectory()) {
-          // recurse
-          deleteFolderRecursive(curPath);
-        } else {
-          // delete file
-          fs.unlinkSync(curPath);
-        }
-      });
-      fs.rmdirSync(path);
-    }
+const deleteFolderRecursive = (path) => {
+  log(['Delete folder', path], 2);
+  if (fs.existsSync(path)) {
+    fs.readdirSync(path).forEach((file) => {
+      const curPath = `${path}/${file}`;
+      if (fs.lstatSync(curPath).isDirectory()) {
+        // recurse
+        deleteFolderRecursive(curPath);
+      } else {
+        // delete file
+        fs.unlinkSync(curPath);
+      }
+    });
+    fs.rmdirSync(path);
+  }
+};
+
+const emptyS3Folder = async (Prefix) => {
+  log(['Empty S3 folder', Prefix], 2);
+  const data = await s3.send(
+    new ListObjectsCommand({
+      Bucket: process.env.S3_BUCKET,
+      Prefix,
+    }),
+  );
+
+  if ((data.Contents?.length || 0) == 0) return;
+
+  const delParams = {
+    Bucket: process.env.S3_BUCKET,
+    Delete: {
+      Objects: [],
+    },
   };
 
-  const emptyS3Folder = async (Prefix) => {
-    log(['Empty S3 folder', Prefix], 2);
-    const data = await s3.send(
-      new ListObjectsCommand({
-        Bucket: process.env.S3_BUCKET,
-        Prefix,
-      }),
-    );
+  const overfull = data.Contents.length >= 1000;
+  data.Contents.slice(0, 999).forEach((content) => {
+    delParams.Delete.Objects.push({ Key: content.Key });
+  });
 
-    if (data.Contents.length == 0) return;
+  if (delParams.Delete.Objects.length > 0) {
+    await s3.send(new DeleteObjectsCommand(delParams));
+    if (overfull) {
+      await emptyS3Folder(Prefix);
+    }
+  }
+};
 
-    const delParams = {
-      Bucket: process.env.S3_BUCKET,
-      Delete: {
-        Objects: [],
-      },
+const deleteBook = async (bookId, next) => {
+  log(['Delete book', bookId], 2);
+  await util.runQuery({
+    query: 'DELETE FROM `book` WHERE id=:bookId',
+    vars: {
+      bookId,
+    },
+    next,
+  });
+
+  await deleteBookSearchIndexRows(bookId, next);
+
+  await emptyS3Folder(`epub_content/book_${bookId}/`);
+};
+
+const deleteBookIfUnassociated = async (bookId, next) => {
+  // clear out book and its user data, if book unassociated
+
+  log(['Check if book is unassociated', bookId]);
+  const rows = await util.runQuery({
+    query: 'SELECT * FROM `book-idp` WHERE book_id=:bookId LIMIT 1',
+    vars: {
+      bookId,
+    },
+    next,
+  });
+
+  if (rows.length > 0) return;
+
+  log(['Check if book is unused', bookId]);
+  const results = await util.runQuery({
+    queries: [
+      'SELECT id FROM book_instance WHERE book_id=:bookId LIMIT 1',
+      'SELECT subscription_id FROM `subscription-book` WHERE book_id=:bookId LIMIT 1',
+    ],
+    vars: {
+      bookId,
+    },
+    next,
+  });
+
+  if (results.some((rows2) => rows2.length > 0)) return;
+
+  await deleteBook(bookId, next);
+};
+
+const deleteBookSearchIndexRows = async (bookId, next) => {
+  log(['Delete book search index rows', bookId], 2);
+  await util.runQuery({
+    queries: [
+      'DELETE FROM `book_textnode_index` WHERE book_id=:bookId',
+      'DELETE FROM `book_textnode_index_term` WHERE book_id=:bookId',
+    ],
+    vars: {
+      bookId,
+    },
+    next,
+  });
+};
+
+const getImageFileType = (fileNameOrPath) => {
+  const mimeType = mime.getType(fileNameOrPath);
+  const fileType = /jpeg/.test(mimeType)
+    ? `jpeg`
+    : /webp/.test(mimeType)
+      ? `webp`
+      : `png`;
+  return fileType;
+};
+
+const getAdjustedImageBody = async (path, fileType, width, height) => {
+  const img = await Jimp.read(path);
+  img.resize(width || Jimp.AUTO, height || Jimp.AUTO);
+  const result = await img.getBufferAsync(
+    fileType === `jpeg` ? Jimp.MIME_JPEG : Jimp.MIME_PNG,
+  );
+  return result;
+};
+
+/**
+ * @typedef {Object} ProcessUploadedFileOptions
+ * @property {Record<string, string>} query
+ * @property {Record<string, any> | undefined} tenantAuthInfo
+ * @property {string | undefined} hostname
+ * @property {Record<string, any>} user
+ * @property {() => string} getFrontendBaseUrl
+ * @property {(data: any) => void} res_send
+ * @property {(status: number) => void} res_status
+ * @property {(key: string, value: string) => void} res_set
+ * @property {(data: string) => void} res_write
+ * @property {() => void} res_end
+ * @property {string[]} epubFilePaths
+ * @property {import('express').NextFunction} next
+ * @property {string} tmpDir
+ *
+ * @param {string} name
+ * @param {multiparty.File} file
+ * @param {ProcessUploadedFileOptions} options
+ */
+const processUploadedFile = async (
+  name,
+  file,
+  {
+    query,
+    tenantAuthInfo,
+    hostname,
+    user,
+    getFrontendBaseUrl,
+    res_send,
+    res_status,
+    res_set,
+    res_write,
+    res_end,
+    epubFilePaths,
+    next,
+    tmpDir,
+  },
+) => {
+  const { replaceExisting } = query;
+  const toUploadDir = `${tmpDir}/toupload`;
+  let bookRow, cleanUpBookIdpToDelete, beganResponse;
+
+  try {
+    if (
+      tenantAuthInfo &&
+      hostname &&
+      (tenantAuthInfo || {}).action !== 'importbook' &&
+      (tenantAuthInfo || {}).domain !== util.getIDPDomain({ host: hostname })
+    ) {
+      throw new Error(`invalid_tenant_auth`);
+    }
+
+    if (!tenantAuthInfo && !user.isAdmin) {
+      throw new Error(`no_permission`);
+    }
+
+    const putEPUBFile = async (relfilepath, body) => {
+      const key = /^epub_content\/covers\//.test(relfilepath)
+        ? relfilepath
+        : `epub_content/book_${bookRow.id}/${relfilepath}`;
+
+      log(['Upload file to S3', key]);
+
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: process.env.S3_BUCKET,
+          Key: key,
+          Body: body,
+          ContentLength: body.byteCount,
+          ContentType: mime.getType(key),
+        }),
+      );
+
+      log(['...uploaded to S3', key]);
     };
 
-    const overfull = data.Contents.length >= 1000;
-    data.Contents.slice(0, 999).forEach((content) => {
-      delParams.Delete.Objects.push({ Key: content.Key });
-    });
+    const getEPUBFilePaths = (path) => {
+      if (fs.existsSync(path)) {
+        fs.readdirSync(path).forEach((file) => {
+          const curPath = `${path}/${file}`;
+          if (fs.lstatSync(curPath).isDirectory()) {
+            // recurse
+            getEPUBFilePaths(curPath);
+          } else {
+            epubFilePaths.push(curPath);
+          }
+        });
+      }
+    };
 
-    if (delParams.Delete.Objects.length > 0) {
-      await s3.send(new DeleteObjectsCommand(delParams));
-      if (overfull) {
-        await emptyS3Folder(Prefix);
+    const filename = file.originalFilename || file.name;
+
+    if (!filename) {
+      console.log('filename', filename);
+      throw new Error(`invalid_filename`);
+    }
+
+    const priceMatch = filename.match(/\$([0-9]+)\.([0-9]{2})(\.[^.]+)?$/);
+    const epubSizeInMebibyte = Math.ceil(file.size / 1024 / 1024);
+
+    if (epubSizeInMebibyte > user.idpMaxMBPerBook) {
+      throw new Error(`file_too_large`);
+    }
+
+    bookRow = {
+      title: 'Unknown',
+      author: '',
+      isbn: '',
+      epubSizeInMB: epubSizeInMebibyte,
+      standardPriceInCents: priceMatch ? priceMatch[1] + priceMatch[2] : null,
+      updated_at: util.timestampToMySQLDatetime(),
+    };
+
+    // Put row into book table
+    log(['Insert book row', bookRow], 2);
+    bookRow.id = (
+      await util.runQuery({
+        query: 'INSERT INTO `book` SET ?',
+        vars: [bookRow],
+        next,
+      })
+    ).insertId;
+
+    await emptyS3Folder(`epub_content/book_${bookRow.id}/`);
+
+    deleteFolderRecursive(toUploadDir);
+
+    fs.mkdirSync(toUploadDir, { recursive: true });
+
+    const zip = new admzip(file.path || file.name);
+    zip.extractAllTo(toUploadDir);
+
+    fs.renameSync(file.path || file.name, `${toUploadDir}/book.epub`);
+
+    getEPUBFilePaths(toUploadDir);
+    await Promise.all(
+      epubFilePaths.map((path) =>
+        putEPUBFile(
+          path.replace(toUploadDir + '/', ''),
+          fs.createReadStream(path),
+        ),
+      ),
+    );
+
+    // TODO: make fonts public
+
+    // after files uploaded
+    const { title, author, isbn, coverHref, spines, success } = await parseEpub(
+      { baseUri: toUploadDir, log },
+    );
+
+    if (!success) {
+      throw Error(`unable_to_process`);
+    }
+
+    // prep to insert the book row
+    bookRow.title = title || 'Unknown';
+    bookRow.author = author || '';
+    bookRow.isbn = isbn || '';
+    bookRow.updated_at = util.timestampToMySQLDatetime();
+
+    // create and save search index
+    let indexObj, searchTermCounts, noOfflineSearch;
+    try {
+      const indexedBook = await getIndexedBook({
+        baseUri: toUploadDir,
+        spines,
+        log,
+      });
+      if (!indexedBook.noOfflineSearch) {
+        await putEPUBFile('search_index.json', indexedBook.jsonStr);
+      }
+      indexObj = indexedBook.indexObj;
+      searchTermCounts = indexedBook.searchTermCounts;
+      noOfflineSearch = indexedBook.noOfflineSearch;
+    } catch (e) {
+      log(e.message, 3);
+      if (/^Search indexing taking too long/.test(e.message)) {
+        throw Error(`search_indexing_too_slow`);
+      } else if (/^EPUB content too massive/.test(e.message)) {
+        throw Error(`text_content_too_massive_for_search_indexing`);
+      } else if (/^EPUB search index overloading memory/.test(e.message)) {
+        throw Error(`search_indexing_memory_overload`);
+      } else {
+        throw Error(`search_indexing_failed`);
       }
     }
-  };
 
-  const deleteBook = async (bookId, next) => {
-    log(['Delete book', bookId], 2);
-    await util.runQuery({
-      query: 'DELETE FROM `book` WHERE id=:bookId',
-      vars: {
-        bookId,
-      },
-      next,
-    });
-
-    await deleteBookSearchIndexRows(bookId, next);
-
-    await emptyS3Folder(`epub_content/book_${bookId}/`);
-  };
-
-  const deleteBookIfUnassociated = async (bookId, next) => {
-    // clear out book and its user data, if book unassociated
-
-    log(['Check if book is unassociated', bookId]);
+    // check if book already exists in same idp group
+    log('Look for identical book in idp group');
     const rows = await util.runQuery({
-      query: 'SELECT * FROM `book-idp` WHERE book_id=:bookId LIMIT 1',
+      query: `
+            SELECT
+              b.*,
+              IF(bi.idp_id=:idpId, 1, 0) as alreadyBookInThisIdp
+
+            FROM book as b
+              LEFT JOIN \`book-idp\` as bi ON (b.id = bi.book_id)
+              LEFT JOIN idp_group_member as igm1 ON (bi.idp_id = igm1.idp_id)
+              LEFT JOIN idp_group_member as igm2 ON (igm1.idp_group_id = igm2.idp_group_id)
+
+            WHERE b.title=:title
+              AND b.author=:author
+              AND b.isbn=:isbn
+              AND (
+                bi.idp_id=:idpId
+                OR igm2.idp_id=:idpId
+              )
+
+            ORDER BY alreadyBookInThisIdp DESC
+
+            LIMIT 1
+          `,
       vars: {
-        bookId,
+        ...bookRow,
+        idpId: user.idpId,
       },
       next,
     });
 
-    if (rows.length > 0) return;
+    if (rows.length === 1 && !replaceExisting) {
+      // clean up
+      deleteFolderRecursive(tmpDir);
 
-    log(['Check if book is unused', bookId]);
-    const results = await util.runQuery({
-      queries: [
-        'SELECT id FROM book_instance WHERE book_id=:bookId LIMIT 1',
-        'SELECT subscription_id FROM `subscription-book` WHERE book_id=:bookId LIMIT 1',
-      ],
-      vars: {
-        bookId,
-      },
-      next,
-    });
+      // delete book
+      await deleteBook(bookRow.id, next);
 
-    if (results.some((rows2) => rows2.length > 0)) return;
+      const responseBase = {
+        success: true,
+        bookId: rows[0].id,
+        noOfflineSearch, // not 100% accurate, but leaving it for now
+        title: rows[0].title,
+        author: rows[0].author,
+        isbn: rows[0].isbn || '',
+        // this also was the old way of doing things
+        thumbnailHref: /^epub_content\/covers\//.test(rows[0].coverHref || ``)
+          ? `${getFrontendBaseUrl()}/${rows[0].coverHref}`
+          : `${getFrontendBaseUrl()}/epub_content/covers/book_${rows[0].id}.png`,
+        epubSizeInMB: rows[0].epubSizeInMB,
+      };
 
-    await deleteBook(bookId, next);
-  };
+      if (rows[0].alreadyBookInThisIdp == '1') {
+        log('Import unnecessary (book already associated with this idp)', 2);
+        res_send({
+          ...responseBase,
+          note: 'already-associated',
+        });
+      } else {
+        const vars = (cleanUpBookIdpToDelete = {
+          book_id: rows[0].id,
+          idp_id: user.idpId,
+        });
+        log(['INSERT book-idp row', vars], 2);
+        await util.runQuery({
+          query: 'INSERT INTO `book-idp` SET ?',
+          vars: [vars],
+          next,
+        });
 
-  const deleteBookSearchIndexRows = async (bookId, next) => {
-    log(['Delete book search index rows', bookId], 2);
-    await util.runQuery({
-      queries: [
-        'DELETE FROM `book_textnode_index` WHERE book_id=:bookId',
-        'DELETE FROM `book_textnode_index_term` WHERE book_id=:bookId',
-      ],
-      vars: {
-        bookId,
-      },
-      next,
-    });
-  };
+        await util.updateComputedBookAccess({
+          idpId: user.idpId,
+          bookId: rows[0].id,
+          log,
+        });
 
-  const getImageFileType = (fileNameOrPath) => {
-    const mimeType = mime.getType(fileNameOrPath);
-    const fileType = /jpeg/.test(mimeType)
-      ? `jpeg`
-      : /webp/.test(mimeType)
-        ? `webp`
-        : `png`;
-    return fileType;
-  };
+        log(
+          'Import unnecessary (book exists in idp with same group; added association)',
+          2,
+        );
+        res_send({
+          ...responseBase,
+          note: 'associated-to-existing',
+        });
+      }
 
-  const getAdjustedImageBody = async (path, fileType, width, height) => {
-    const img = await Jimp.read(path);
-    img.resize(width || Jimp.AUTO, height || Jimp.AUTO);
-    const result = await img.getBufferAsync(
-      fileType === `jpeg` ? Jimp.MIME_JPEG : Jimp.MIME_PNG,
+      return;
+    }
+
+    if (replaceExisting) {
+      const row = rows[0];
+
+      if (!row || row.alreadyBookInThisIdp != '1') {
+        throw new Error(`does-not-exist`);
+      }
+
+      // copy the old s3 dir to `book_XX--replaced-[timestamp]`
+      await util.s3CopyFolder({
+        source: `epub_content/book_${row.id}/`,
+        destination: `epub_content/book_${row.id}--replaced-${Date.now()}/`,
+      });
+
+      // copy new s3 dir to where old was
+      await util.s3CopyFolder({
+        source: `epub_content/book_${bookRow.id}/`,
+        destination: `epub_content/book_${row.id}/`,
+      });
+
+      // delete the new book
+      await deleteBook(bookRow.id, next);
+
+      // delete the search index rows for the old book
+      deleteBookSearchIndexRows(row.id, next);
+
+      // change bookRow.id so that the existing row gets updated
+      bookRow.id = row.id;
+    } else {
+      const vars = (cleanUpBookIdpToDelete = {
+        book_id: bookRow.id,
+        idp_id: user.idpId,
+      });
+      log(['INSERT book-idp row', vars], 2);
+      await util.runQuery({
+        query: 'INSERT INTO `book-idp` SET ?',
+        vars: [vars],
+        next,
+      });
+    }
+
+    // From this point, we expect it to be successful. Send some info to keep the connection alive.
+    beganResponse = true;
+    res_set('Content-Type', 'application/json');
+    res_write(`{`);
+    let timeOfLastResponseWrite = Date.now();
+    let writeResponseIndex = 0;
+    const addToResponseToKeepAlive = () => {
+      if (Date.now() > timeOfLastResponseWrite + 1000 * 30) {
+        res_write(`"ignore-${writeResponseIndex++}":0,`);
+        timeOfLastResponseWrite = Date.now();
+      }
+    };
+
+    const numInsertsAtOnce = 500;
+
+    // save search index to db (needs to be down here after bookRow.id gets updated if replaceExisting is true)
+    const storedFields = Object.values(indexObj.storedFields);
+    for (let i = 0; i < storedFields.length; i += numInsertsAtOnce) {
+      const chunk = storedFields.slice(i, i + numInsertsAtOnce);
+
+      util.convertJsonColsToStrings({
+        tableName: 'book_textnode_index',
+        rows: chunk,
+      });
+
+      log(
+        [
+          `INSERT ${numInsertsAtOnce} book_textnode_index rows from index ${i}...`,
+        ],
+        2,
+      );
+      await util.runQuery({
+        query: `INSERT INTO book_textnode_index (id, book_id, spineIdRef, text, hitIndex, context) VALUES ${chunk.map(() => `(?,?,?,?,?,?)`).join(',')}`,
+        vars: chunk
+          .map((textnodeInfo) => [
+            textnodeInfo.id,
+            bookRow.id,
+            textnodeInfo.spineIdRef,
+            textnodeInfo.text,
+            textnodeInfo.hitIndex,
+            textnodeInfo.context,
+          ])
+          .flat(),
+        next,
+      });
+
+      addToResponseToKeepAlive();
+    }
+
+    // save search index terms to db (needs to be down here after bookRow.id gets updated if replaceExisting is true)
+    const searchTerms = Object.keys(searchTermCounts).filter(
+      (searchTerm) => searchTermCounts[searchTerm],
     );
-    return result;
-  };
+    for (let i = 0; i < searchTerms.length; i += numInsertsAtOnce) {
+      const chunk = searchTerms.slice(i, i + numInsertsAtOnce);
 
+      log(
+        [
+          `INSERT ${numInsertsAtOnce} book_textnode_index_term rows from index ${i}...`,
+        ],
+        2,
+      );
+      await util.runQuery({
+        query: `INSERT INTO book_textnode_index_term (term, count, book_id) VALUES ${chunk.map(() => `(?,?,?)`).join(',')}`,
+        vars: chunk
+          .map((searchTerm) => [
+            searchTerm,
+            searchTermCounts[searchTerm],
+            bookRow.id,
+          ])
+          .flat(),
+        next,
+      });
+
+      addToResponseToKeepAlive();
+    }
+
+    // following block needs to be down here after bookRow.id gets updated if replaceExisting is true
+    bookRow.rootUrl = `epub_content/book_${bookRow.id}`;
+    if (coverHref) {
+      const fileType = getImageFileType(coverHref);
+      bookRow.coverHref = `epub_content/covers/${uuidv4()}.${fileType}`;
+      // Width of 480 is twice that of the ~240px max width for the most recent book
+      const imgData = await getAdjustedImageBody(
+        `${toUploadDir}/${coverHref}`,
+        fileType,
+        480,
+      );
+      await putEPUBFile(bookRow.coverHref, imgData);
+    }
+
+    // clean up
+    deleteFolderRecursive(tmpDir);
+
+    log(['Update book row', bookRow.id, bookRow], 2);
+    await util.runQuery({
+      query: 'UPDATE `book` SET :bookRow WHERE id=:bookId',
+      vars: {
+        bookId: bookRow.id,
+        bookRow,
+      },
+      next,
+    });
+
+    await util.updateComputedBookAccess({
+      idpId: user.idpId,
+      bookId: bookRow.id,
+      log,
+    });
+
+    log('Import successful', 2);
+    try {
+      // If everything was successful, but the connection timed out, don't delete it.
+      res_write(
+        `"success": true,` +
+          (noOfflineSearch ? `"noOfflineSearch": true,` : ``) +
+          `"bookId": ${bookRow.id},` +
+          `"title": "${bookRow.title.replace(/"/g, '\\"')}",` +
+          `"author": "${bookRow.author.replace(/"/g, '\\"')}",` +
+          `"isbn": "${(bookRow.isbn || '').replace(/"/g, '\\"')}",` +
+          `"thumbnailHref": "${getFrontendBaseUrl()}/${bookRow.coverHref}",` +
+          `"epubSizeInMB": ${bookRow.epubSizeInMB}` +
+          `}`,
+      );
+      res_end();
+    } catch {
+      // Do nothing
+    }
+  } catch (err) {
+    log(['Import book exception', err.message], 3);
+
+    // clean up...
+
+    try {
+      if (cleanUpBookIdpToDelete) {
+        await util.runQuery({
+          query:
+            'DELETE FROM `book-idp` WHERE idp_id=:idp_id AND book_id=:book_id',
+          vars: cleanUpBookIdpToDelete,
+          next,
+        });
+      }
+    } catch {
+      // Do nothing
+    }
+
+    try {
+      if (bookRow) {
+        await deleteBookIfUnassociated(bookRow.id, next);
+        await util.updateComputedBookAccess({
+          idpId: user.idpId,
+          bookId: bookRow.id,
+          log,
+        });
+      }
+
+      deleteFolderRecursive(tmpDir);
+    } catch (err3) {
+      log(['Error in responding to import error!', err3.message], 3);
+    }
+
+    if (beganResponse) {
+      res_write(`"success": false` + `}`);
+      res_end();
+    } else {
+      res_status(400);
+      res_send({
+        errorType: /^[-_a-z]+$/.test(err.message)
+          ? err.message
+          : 'unable_to_process',
+        maxMB: user.idpMaxMBPerBook,
+      });
+    }
+  }
+};
+
+module.exports = function (app, ensureAuthenticatedAndCheckIDP) {
   // delete a book
   app.delete(
     ['/', '/book/:bookId'],
@@ -200,10 +695,7 @@ module.exports = function (app, ensureAuthenticatedAndCheckIDP) {
     ensureAuthenticatedAndCheckIDP,
     async (req, res, next) => {
       const tmpDir = `${baseTmpDir}tmp_epub_${util.getUTCTimeStamp()}`;
-      const toUploadDir = `${tmpDir}/toupload`;
       const epubFilePaths = [];
-      let bookRow, cleanUpBookIdpToDelete, beganResponse;
-      const { replaceExisting } = req.query;
 
       deleteFolderRecursive(tmpDir);
 
@@ -219,464 +711,21 @@ module.exports = function (app, ensureAuthenticatedAndCheckIDP) {
         if (processedOneFile) return;
         processedOneFile = true;
 
-        try {
-          if (
-            req.tenantAuthInfo &&
-            (req.tenantAuthInfo || {}).action !== 'importbook' &&
-            (req.tenantAuthInfo || {}).domain !==
-              util.getIDPDomain({ host: req.hostname || req.headers.host })
-          ) {
-            throw new Error(`invalid_tenant_auth`);
-          }
-
-          if (!req.tenantAuthInfo && !req.user.isAdmin) {
-            throw new Error(`no_permission`);
-          }
-
-          const putEPUBFile = async (relfilepath, body) => {
-            const key = /^epub_content\/covers\//.test(relfilepath)
-              ? relfilepath
-              : `epub_content/book_${bookRow.id}/${relfilepath}`;
-
-            log(['Upload file to S3', key]);
-
-            await s3.send(
-              new PutObjectCommand({
-                Bucket: process.env.S3_BUCKET,
-                Key: key,
-                Body: body,
-                ContentLength: body.byteCount,
-                ContentType: mime.getType(key),
-              }),
-            );
-
-            log(['...uploaded to S3', key]);
-          };
-
-          const getEPUBFilePaths = (path) => {
-            if (fs.existsSync(path)) {
-              fs.readdirSync(path).forEach((file) => {
-                const curPath = `${path}/${file}`;
-                if (fs.lstatSync(curPath).isDirectory()) {
-                  // recurse
-                  getEPUBFilePaths(curPath);
-                } else {
-                  epubFilePaths.push(curPath);
-                }
-              });
-            }
-          };
-
-          const filename = file.originalFilename;
-
-          if (!filename) {
-            throw new Error(`invalid_filename`);
-          }
-
-          const priceMatch = filename.match(
-            /\$([0-9]+)\.([0-9]{2})(\.[^.]+)?$/,
-          );
-          const epubSizeInMebibyte = Math.ceil(file.size / 1024 / 1024);
-
-          if (epubSizeInMebibyte > req.user.idpMaxMBPerBook) {
-            throw new Error(`file_too_large`);
-          }
-
-          bookRow = {
-            title: 'Unknown',
-            author: '',
-            isbn: '',
-            epubSizeInMB: epubSizeInMebibyte,
-            standardPriceInCents: priceMatch
-              ? priceMatch[1] + priceMatch[2]
-              : null,
-            updated_at: util.timestampToMySQLDatetime(),
-          };
-
-          // Put row into book table
-          log(['Insert book row', bookRow], 2);
-          bookRow.id = (
-            await util.runQuery({
-              query: 'INSERT INTO `book` SET ?',
-              vars: [bookRow],
-              next,
-            })
-          ).insertId;
-
-          await emptyS3Folder(`epub_content/book_${bookRow.id}/`);
-
-          deleteFolderRecursive(toUploadDir);
-
-          fs.mkdirSync(toUploadDir);
-
-          const zip = new admzip(file.path);
-          zip.extractAllTo(toUploadDir);
-
-          fs.renameSync(file.path, `${toUploadDir}/book.epub`);
-
-          getEPUBFilePaths(toUploadDir);
-          await Promise.all(
-            epubFilePaths.map((path) =>
-              putEPUBFile(
-                path.replace(toUploadDir + '/', ''),
-                fs.createReadStream(path),
-              ),
-            ),
-          );
-
-          // TODO: make fonts public
-
-          // after files uploaded
-          const { title, author, isbn, coverHref, spines, success } =
-            await parseEpub({ baseUri: toUploadDir, log });
-
-          if (!success) {
-            throw Error(`unable_to_process`);
-          }
-
-          // prep to insert the book row
-          bookRow.title = title || 'Unknown';
-          bookRow.author = author || '';
-          bookRow.isbn = isbn || '';
-          bookRow.updated_at = util.timestampToMySQLDatetime();
-
-          // create and save search index
-          let indexObj, searchTermCounts, noOfflineSearch;
-          try {
-            const indexedBook = await getIndexedBook({
-              baseUri: toUploadDir,
-              spines,
-              log,
-            });
-            if (!indexedBook.noOfflineSearch) {
-              await putEPUBFile('search_index.json', indexedBook.jsonStr);
-            }
-            indexObj = indexedBook.indexObj;
-            searchTermCounts = indexedBook.searchTermCounts;
-            noOfflineSearch = indexedBook.noOfflineSearch;
-          } catch (e) {
-            log(e.message, 3);
-            if (/^Search indexing taking too long/.test(e.message)) {
-              throw Error(`search_indexing_too_slow`);
-            } else if (/^EPUB content too massive/.test(e.message)) {
-              throw Error(`text_content_too_massive_for_search_indexing`);
-            } else if (
-              /^EPUB search index overloading memory/.test(e.message)
-            ) {
-              throw Error(`search_indexing_memory_overload`);
-            } else {
-              throw Error(`search_indexing_failed`);
-            }
-          }
-
-          // check if book already exists in same idp group
-          log('Look for identical book in idp group');
-          const rows = await util.runQuery({
-            query: `
-            SELECT
-              b.*,
-              IF(bi.idp_id=:idpId, 1, 0) as alreadyBookInThisIdp
-
-            FROM book as b
-              LEFT JOIN \`book-idp\` as bi ON (b.id = bi.book_id)
-              LEFT JOIN idp_group_member as igm1 ON (bi.idp_id = igm1.idp_id)
-              LEFT JOIN idp_group_member as igm2 ON (igm1.idp_group_id = igm2.idp_group_id)
-
-            WHERE b.title=:title
-              AND b.author=:author
-              AND b.isbn=:isbn
-              AND (
-                bi.idp_id=:idpId
-                OR igm2.idp_id=:idpId
-              )
-
-            ORDER BY alreadyBookInThisIdp DESC
-
-            LIMIT 1
-          `,
-            vars: {
-              ...bookRow,
-              idpId: req.user.idpId,
-            },
-            next,
-          });
-
-          if (rows.length === 1 && !replaceExisting) {
-            // clean up
-            deleteFolderRecursive(tmpDir);
-
-            // delete book
-            await deleteBook(bookRow.id, next);
-
-            const responseBase = {
-              success: true,
-              bookId: rows[0].id,
-              noOfflineSearch, // not 100% accurate, but leaving it for now
-              title: rows[0].title,
-              author: rows[0].author,
-              isbn: rows[0].isbn || '',
-              // this also was the old way of doing things
-              thumbnailHref: /^epub_content\/covers\//.test(
-                rows[0].coverHref || ``,
-              )
-                ? `${util.getFrontendBaseUrl(req)}/${rows[0].coverHref}`
-                : `${util.getFrontendBaseUrl(req)}/epub_content/covers/book_${rows[0].id}.png`,
-              epubSizeInMB: rows[0].epubSizeInMB,
-            };
-
-            if (rows[0].alreadyBookInThisIdp == '1') {
-              log(
-                'Import unnecessary (book already associated with this idp)',
-                2,
-              );
-              res.send({
-                ...responseBase,
-                note: 'already-associated',
-              });
-            } else {
-              const vars = (cleanUpBookIdpToDelete = {
-                book_id: rows[0].id,
-                idp_id: req.user.idpId,
-              });
-              log(['INSERT book-idp row', vars], 2);
-              await util.runQuery({
-                query: 'INSERT INTO `book-idp` SET ?',
-                vars: [vars],
-                next,
-              });
-
-              await util.updateComputedBookAccess({
-                idpId: req.user.idpId,
-                bookId: rows[0].id,
-                log,
-              });
-
-              log(
-                'Import unnecessary (book exists in idp with same group; added association)',
-                2,
-              );
-              res.send({
-                ...responseBase,
-                note: 'associated-to-existing',
-              });
-            }
-
-            return;
-          }
-
-          if (replaceExisting) {
-            const row = rows[0];
-
-            if (!row || row.alreadyBookInThisIdp != '1') {
-              throw new Error(`does-not-exist`);
-            }
-
-            // copy the old s3 dir to `book_XX--replaced-[timestamp]`
-            await util.s3CopyFolder({
-              source: `epub_content/book_${row.id}/`,
-              destination: `epub_content/book_${row.id}--replaced-${Date.now()}/`,
-            });
-
-            // copy new s3 dir to where old was
-            await util.s3CopyFolder({
-              source: `epub_content/book_${bookRow.id}/`,
-              destination: `epub_content/book_${row.id}/`,
-            });
-
-            // delete the new book
-            await deleteBook(bookRow.id, next);
-
-            // delete the search index rows for the old book
-            deleteBookSearchIndexRows(row.id, next);
-
-            // change bookRow.id so that the existing row gets updated
-            bookRow.id = row.id;
-          } else {
-            const vars = (cleanUpBookIdpToDelete = {
-              book_id: bookRow.id,
-              idp_id: req.user.idpId,
-            });
-            log(['INSERT book-idp row', vars], 2);
-            await util.runQuery({
-              query: 'INSERT INTO `book-idp` SET ?',
-              vars: [vars],
-              next,
-            });
-          }
-
-          // From this point, we expect it to be successful. Send some info to keep the connection alive.
-          beganResponse = true;
-          res.set('Content-Type', 'application/json');
-          res.write(`{`);
-          let timeOfLastResponseWrite = Date.now();
-          let writeResponseIndex = 0;
-          const addToResponseToKeepAlive = () => {
-            if (Date.now() > timeOfLastResponseWrite + 1000 * 30) {
-              res.write(`"ignore-${writeResponseIndex++}":0,`);
-              timeOfLastResponseWrite = Date.now();
-            }
-          };
-
-          const numInsertsAtOnce = 500;
-
-          // save search index to db (needs to be down here after bookRow.id gets updated if replaceExisting is true)
-          const storedFields = Object.values(indexObj.storedFields);
-          for (let i = 0; i < storedFields.length; i += numInsertsAtOnce) {
-            const chunk = storedFields.slice(i, i + numInsertsAtOnce);
-
-            util.convertJsonColsToStrings({
-              tableName: 'book_textnode_index',
-              rows: chunk,
-            });
-
-            log(
-              [
-                `INSERT ${numInsertsAtOnce} book_textnode_index rows from index ${i}...`,
-              ],
-              2,
-            );
-            await util.runQuery({
-              query: `INSERT INTO book_textnode_index (id, book_id, spineIdRef, text, hitIndex, context) VALUES ${chunk.map(() => `(?,?,?,?,?,?)`).join(',')}`,
-              vars: chunk
-                .map((textnodeInfo) => [
-                  textnodeInfo.id,
-                  bookRow.id,
-                  textnodeInfo.spineIdRef,
-                  textnodeInfo.text,
-                  textnodeInfo.hitIndex,
-                  textnodeInfo.context,
-                ])
-                .flat(),
-              next,
-            });
-
-            addToResponseToKeepAlive();
-          }
-
-          // save search index terms to db (needs to be down here after bookRow.id gets updated if replaceExisting is true)
-          const searchTerms = Object.keys(searchTermCounts).filter(
-            (searchTerm) => searchTermCounts[searchTerm],
-          );
-          for (let i = 0; i < searchTerms.length; i += numInsertsAtOnce) {
-            const chunk = searchTerms.slice(i, i + numInsertsAtOnce);
-
-            log(
-              [
-                `INSERT ${numInsertsAtOnce} book_textnode_index_term rows from index ${i}...`,
-              ],
-              2,
-            );
-            await util.runQuery({
-              query: `INSERT INTO book_textnode_index_term (term, count, book_id) VALUES ${chunk.map(() => `(?,?,?)`).join(',')}`,
-              vars: chunk
-                .map((searchTerm) => [
-                  searchTerm,
-                  searchTermCounts[searchTerm],
-                  bookRow.id,
-                ])
-                .flat(),
-              next,
-            });
-
-            addToResponseToKeepAlive();
-          }
-
-          // following block needs to be down here after bookRow.id gets updated if replaceExisting is true
-          bookRow.rootUrl = `epub_content/book_${bookRow.id}`;
-          if (coverHref) {
-            const fileType = getImageFileType(coverHref);
-            bookRow.coverHref = `epub_content/covers/${uuidv4()}.${fileType}`;
-            // Width of 480 is twice that of the ~240px max width for the most recent book
-            const imgData = await getAdjustedImageBody(
-              `${toUploadDir}/${coverHref}`,
-              fileType,
-              480,
-            );
-            await putEPUBFile(bookRow.coverHref, imgData);
-          }
-
-          // clean up
-          deleteFolderRecursive(tmpDir);
-
-          log(['Update book row', bookRow.id, bookRow], 2);
-          await util.runQuery({
-            query: 'UPDATE `book` SET :bookRow WHERE id=:bookId',
-            vars: {
-              bookId: bookRow.id,
-              bookRow,
-            },
-            next,
-          });
-
-          await util.updateComputedBookAccess({
-            idpId: req.user.idpId,
-            bookId: bookRow.id,
-            log,
-          });
-
-          log('Import successful', 2);
-          try {
-            // If everything was successful, but the connection timed out, don't delete it.
-            res.write(
-              `"success": true,` +
-                (noOfflineSearch ? `"noOfflineSearch": true,` : ``) +
-                `"bookId": ${bookRow.id},` +
-                `"title": "${bookRow.title.replace(/"/g, '\\"')}",` +
-                `"author": "${bookRow.author.replace(/"/g, '\\"')}",` +
-                `"isbn": "${(bookRow.isbn || '').replace(/"/g, '\\"')}",` +
-                `"thumbnailHref": "${util.getFrontendBaseUrl(req)}/${bookRow.coverHref}",` +
-                `"epubSizeInMB": ${bookRow.epubSizeInMB}` +
-                `}`,
-            );
-            res.end();
-          } catch {
-            // Do nothing
-          }
-        } catch (err) {
-          log(['Import book exception', err.message], 3);
-
-          // clean up...
-
-          try {
-            if (cleanUpBookIdpToDelete) {
-              await util.runQuery({
-                query:
-                  'DELETE FROM `book-idp` WHERE idp_id=:idp_id AND book_id=:book_id',
-                vars: cleanUpBookIdpToDelete,
-                next,
-              });
-            }
-          } catch {
-            // Do nothing
-          }
-
-          try {
-            if (bookRow) {
-              await deleteBookIfUnassociated(bookRow.id, next);
-              await util.updateComputedBookAccess({
-                idpId: req.user.idpId,
-                bookId: bookRow.id,
-                log,
-              });
-            }
-
-            deleteFolderRecursive(tmpDir);
-          } catch (err3) {
-            log(['Error in responding to import error!', err3.message], 3);
-          }
-
-          if (beganResponse) {
-            res.write(`"success": false` + `}`);
-            res.end();
-          } else {
-            res.status(400).send({
-              errorType: /^[-_a-z]+$/.test(err.message)
-                ? err.message
-                : 'unable_to_process',
-              maxMB: req.user.idpMaxMBPerBook,
-            });
-          }
-        }
+        return processUploadedFile(name, file, {
+          query: req.query,
+          tenantAuthInfo: req.tenantAuthInfo,
+          hostname: req.hostname || req.headers.host,
+          user: req.user,
+          getFrontendBaseUrl: () => util.getFrontendBaseUrl(req),
+          res_send: res.send.bind(res),
+          res_status: res.status.bind(res),
+          res_set: res.set.bind(res),
+          res_write: res.write.bind(res),
+          res_end: res.end.bind(res),
+          epubFilePaths,
+          next,
+          tmpDir,
+        });
       });
 
       form.on('error', () => {
@@ -1991,3 +2040,5 @@ module.exports = function (app, ensureAuthenticatedAndCheckIDP) {
     },
   );
 };
+
+module.exports.processUploadedFile = processUploadedFile;
