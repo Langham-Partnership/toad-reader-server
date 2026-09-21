@@ -59,7 +59,7 @@ LABEL org.opencontainers.image.authors=${AUTHOR} \
   org.opencontainers.image.description="eReader" \
   org.opencontainers.image.source="https://github.com/Langham-Partnership/toad-reader-server" \
   org.opencontainers.image.revision=${REVISION:-unspecified} \
-  org.opencontainers.image.title="Langham-Partnership/toad-reader-server" \
+  org.opencontainers.image.title="langham-partnership/toad-reader-server" \
   org.opencontainers.image.vendor="Langham Partnership" \
   org.opencontainers.image.version=${TAG_VERSION_NUMBER}
 

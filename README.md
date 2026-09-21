@@ -27,7 +27,7 @@ A file called `proxy.pac` is generated and hosted by Caddy, to simplify connecti
 
     https://localhost:3128/proxy.pac
 
-You will also need to add the `rootCA.crt` root certificate to your OS or browser's certificates manager. This certificate is available inside the `Langham-Partnership/shibboleth-common:1.0.0-dev` Docker image, after this has been built.
+You will also need to add the `rootCA.crt` root certificate to your OS or browser's certificates manager. This certificate is available inside the `langham-partnership/shibboleth-common:1.0.0-dev` Docker image, after this has been built.
 
 # Installation (standalone server, dev mode)
 

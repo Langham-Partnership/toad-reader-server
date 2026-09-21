@@ -87,7 +87,7 @@ jobs:
             ghcr.io/${{ github.repository }}
             #${{ github.repository }}
           annotations: |
-            org.opencontainers.image.title=Langham-Partnership/toad-reader-server
+            org.opencontainers.image.title=langham-partnership/toad-reader-server
             org.opencontainers.image.description=eReader
             # org.opencontainers.image.vendor=BI Ltd
           sep-annotations: ' --annotation '
