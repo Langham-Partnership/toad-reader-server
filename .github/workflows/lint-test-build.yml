@@ -5,11 +5,16 @@ on:
 
   push:
     branches:
-      - bm-develop
+      - dev
 
 permissions:
   contents: read
+  id-token: write # OIDC assertion for the ECR push role
   packages: write
+
+env:
+  AWS_REGION: eu-west-2
+  ECR_REPOSITORY: ereader-staging
 
 jobs:
   build:
@@ -41,6 +46,35 @@ jobs:
         with:
           version: latest
 
+      # The ECR push has to follow the same rule the --push flag below already follows: only the matrix leg whose Node
+      # version matches .nvmrc publishes anything. Without that test both legs would tag the same ECR image, and which
+      # of the two landed on :latest would come down to which finished last.
+      - name: Decide whether this leg pushes to ECR
+        id: publish
+        if: steps.buildx.outcome == 'success'
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = 'push' ] \
+            && [ "${{ github.ref }}" = 'refs/heads/dev' ] \
+            && [ "${{ matrix.node-version }}" -eq "$(cat .nvmrc)" ]; then
+            echo 'ecr=true' >> $GITHUB_OUTPUT
+          else
+            echo 'ecr=false' >> $GITHUB_OUTPUT
+          fi
+
+      - name: Configure AWS credentials
+        if: steps.publish.outputs.ecr == 'true'
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-toad-reader-server-${{ github.run_id }}
+          role-to-assume: ${{ vars.AWS_ECR_PUSH_ROLE_ARN }}
+
+      - name: Log in to Amazon ECR
+        id: ecr
+        if: steps.publish.outputs.ecr == 'true'
+        uses: aws-actions/amazon-ecr-login@v2
+
       - name: Docker meta
         if: steps.buildx.outcome == 'success'
         id: meta
@@ -53,20 +87,40 @@ jobs:
             ghcr.io/${{ github.repository }}
             #${{ github.repository }}
           annotations: |
-            org.opencontainers.image.title=biblemesh/toad-reader-server
+            org.opencontainers.image.title=langham-partnership/toad-reader-server
             org.opencontainers.image.description=eReader
             # org.opencontainers.image.vendor=BI Ltd
           sep-annotations: ' --annotation '
           tags: |
-            type=edge,branch=bm-develop
+            type=edge,branch=dev
             type=ref,event=branch
             type=ref,event=pr
             type=sha
 
+      # A second metadata step rather than a second entry in images: above, because the registry host is only known
+      # once amazon-ecr-login has run, and a conditionally-empty image name is not something metadata-action accepts.
+      # DOCKER_METADATA_SET_OUTPUT_ENV is off here so this does not overwrite the ghcr step's DOCKER_METADATA_OUTPUT_*.
+      - name: Docker meta (ECR staging)
+        if: steps.publish.outputs.ecr == 'true'
+        id: meta-ecr
+        uses: docker/metadata-action@v6
+        env:
+          DOCKER_METADATA_SET_OUTPUT_ENV: 'false'
+        with:
+          images: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+          tags: |
+            type=raw,value=latest
+            type=sha
+
       - name: Set variables for ci:build
         if: matrix.action == 'build'
+        env:
+          ECR_TAGS: ${{ steps.meta-ecr.outputs.tags }}
         run: |
-          echo $DOCKER_METADATA_OUTPUT_JSON | jq -r '"DOCKER_TAGS=-t " + (.tags | join(" -t "))' >> $GITHUB_ENV
+          # ghcr tags come from DOCKER_METADATA_OUTPUT_JSON, ECR tags from the step output. ECR_TAGS is empty on every
+          # leg that is not a dev push, and sed drops the blank line that leaves behind.
+          tags=$( { echo $DOCKER_METADATA_OUTPUT_JSON | jq -r '.tags[]'; printf '%s\n' "$ECR_TAGS"; } | sed '/^$/d' )
+          echo "DOCKER_TAGS=$(printf '%s\n' "$tags" | sed 's/^/-t /' | tr '\n' ' ')" >> $GITHUB_ENV
           echo $DOCKER_METADATA_OUTPUT_JSON | jq -r '"REVISION=" + (.labels."org.opencontainers.image.revision")' >> $GITHUB_ENV
           echo $DOCKER_METADATA_OUTPUT_JSON | jq -r '"TAG_VERSION_NUMBER=" + (.labels."org.opencontainers.image.version")' >> $GITHUB_ENV
           echo $DOCKER_METADATA_OUTPUT_JSON | jq -r '"DATETIMENOW=" + (.labels."org.opencontainers.image.created")' >> $GITHUB_ENV
@@ -89,7 +143,7 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_SERVICE_V2', process.env['ACTIONS_CACHE_SERVICE_V2'])
             core.exportVariable('ACTIONS_RESULTS_URL', process.env['ACTIONS_RESULTS_URL'])
 
-      - name: Login to GitHub Container Registry
+      - name: Log in to GitHub Container Registry
         if: matrix.action == 'build'
         uses: docker/login-action@v4
         with:
@@ -103,5 +157,5 @@ jobs:
         env:
           GITHASH: ${{ github.sha }}
           GITHUB_REPO: ${{ github.repository }}
-          BASE_BRANCH: ${{ github.base_ref || 'bm-develop' }}
+          BASE_BRANCH: ${{ github.base_ref || 'dev' }}
           NODE_VERSION: ${{ matrix.node-version }}
