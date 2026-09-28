@@ -854,7 +854,9 @@ module.exports = function (
     '/addpushtoken',
     ensureAuthenticatedAndCheckIDP,
     async (req, res, next) => {
-      if (!util.paramsOk(req.body, ['token'])) {
+      // previousToken is optional (READER-145). paramsOk refuses any key it is not told about, so it must be listed here,
+      // or every request from a device whose token changed is refused with a 400.
+      if (!util.paramsOk(req.body, ['token'], ['previousToken'])) {
         log(['Invalid parameter(s)', req.body], 3);
         res.status(400).send();
         return;
@@ -874,7 +876,7 @@ module.exports = function (
         next,
       });
 
-      await util.runQuery({
+      const upsertResult = await util.runQuery({
         query: pushToken
           ? 'UPDATE push_token SET :update WHERE id=:id'
           : 'INSERT push_token SET :insert',
@@ -893,6 +895,29 @@ module.exports = function (
         },
         next,
       });
+
+      // runQuery has already passed a failure to next(). Do not retire the old token if the new one was not saved.
+      if (!upsertResult) return;
+
+      // READER-145. The app sends the token it held before when its token changes, for example the first launch under
+      // a different Expo project. Retire it, but only if it belongs to this user, so a device cannot retire anyone
+      // else's token. Soft delete, as logout does.
+      if (
+        typeof req.body.previousToken === 'string' &&
+        req.body.previousToken &&
+        req.body.previousToken !== req.body.token
+      ) {
+        await util.runQuery({
+          query:
+            'UPDATE push_token SET deleted_at=:now WHERE user_id=:userId AND token=:previousToken AND deleted_at IS NULL',
+          vars: {
+            now,
+            userId: req.user.id,
+            previousToken: req.body.previousToken,
+          },
+          next,
+        });
+      }
 
       res.status(200).send({ success: true });
     },
