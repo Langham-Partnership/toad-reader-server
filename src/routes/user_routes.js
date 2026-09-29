@@ -907,7 +907,7 @@ module.exports = function (
         req.body.previousToken &&
         req.body.previousToken !== req.body.token
       ) {
-        await util.runQuery({
+        const retireResult = await util.runQuery({
           query:
             'UPDATE push_token SET deleted_at=:now WHERE user_id=:userId AND token=:previousToken AND deleted_at IS NULL',
           vars: {
@@ -917,6 +917,10 @@ module.exports = function (
           },
           next,
         });
+
+        // Same guard as the upsert: runQuery has already sent the 500 through next(), and replying again would throw
+        // ERR_HTTP_HEADERS_SENT as an unhandled rejection.
+        if (!retireResult) return;
       }
 
       res.status(200).send({ success: true });

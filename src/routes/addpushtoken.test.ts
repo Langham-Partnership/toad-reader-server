@@ -108,4 +108,26 @@ describe('POST /addpushtoken', () => {
       .expect(500);
     expect(calls.some((c) => /deleted_at=:now/.test(c.sql))).toBe(false);
   });
+
+  it('answers once with a 500, and throws nothing, when retiring the old token fails', async () => {
+    const { app, calls } = setUp((sql) => /deleted_at=:now/.test(sql));
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown) => rejections.push(reason);
+    process.on('unhandledRejection', onRejection);
+    try {
+      await request(app)
+        .post('/addpushtoken')
+        .send({
+          token: 'ExponentPushToken[new]',
+          previousToken: 'ExponentPushToken[old]',
+        })
+        .expect(500);
+      // Let the handler run on past the response, where a second reply would throw.
+      await new Promise((resolve) => setImmediate(resolve));
+    } finally {
+      process.off('unhandledRejection', onRejection);
+    }
+    expect(calls.some((c) => /deleted_at=:now/.test(c.sql))).toBe(true);
+    expect(rejections).toEqual([]);
+  });
 });
