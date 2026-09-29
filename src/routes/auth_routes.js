@@ -381,12 +381,35 @@ module.exports = function (app, passport, authFuncs, ensureAuthenticated, logIn)
         return
       }
 
+      // READER-149. Email login exists only for EMAIL and NONE_OR_EMAIL tenants, the two cases in which the app offers
+      // it (Login.js usingEmailLogin, AppMenu's isNoneOrEmail). Without this check the route mails a login code to any
+      // address it is given, for any tenant, including Shibboleth ones. The test login above sends no email, so it
+      // stays open.
+      const idpRows = await util.runQuery({
+        query: 'SELECT authMethod FROM idp WHERE domain=:domain',
+        vars: {
+          domain: util.getIDPDomain({ host: req.hostname || req.headers.host }),
+        },
+        next,
+      })
+      if(!idpRows) return  // runQuery has already passed the error to next()
+
+      const [ idp ] = idpRows
+      if(!['EMAIL', 'NONE_OR_EMAIL'].includes(process.env.AUTH_METHOD_OVERRIDE || (idp || {}).authMethod)) {
+        log(['Email login refused: tenant does not use email login', (idp || {}).authMethod], 2)
+        res.status(403).send({
+          success: false,
+          error: 'email login not available',
+        })
+        return
+      }
+
       if(!util.isValidEmail(req.query.email)) {
-        // TODO we should add return here
         res.status(400).send({
           success: false,
           error: 'invalid email',
         })
+        return
       }
 
       let accessCode = util.createAccessCode()
@@ -398,9 +421,10 @@ module.exports = function (app, passport, authFuncs, ensureAuthenticated, logIn)
 
       await util.setLoginInfoByAccessCode({ accessCode, loginInfo, next })
 
-      // if(process.env.IS_DEV) {
+      // The code is a credential for the next 15 minutes, so it is written to the log in development only.
+      if(process.env.IS_DEV) {
         log(`Login code: ${accessCode}`)
-      // }
+      }
 
       try {
 
@@ -419,8 +443,10 @@ module.exports = function (app, passport, authFuncs, ensureAuthenticated, logIn)
           req,
         })
 
-      } catch (err) {
-        res.status(500).send({ success: false, error: err.message })
+      } catch {
+        // sendEmail rejects with a string, and the detail (which names the sending identity) is already logged there
+        res.status(500).send({ success: false, error: 'email send failed' })
+        return
       }
 
       let numSessionsThisWillLogOut = 0
