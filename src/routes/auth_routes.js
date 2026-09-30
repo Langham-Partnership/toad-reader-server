@@ -1,65 +1,57 @@
-const { log } = require('../utils/logger')
-const util = require('../utils/util')
-const { i18n } = require("inline-i18n")
-const sendEmail = require("../utils/sendEmail")
+const { log } = require('../utils/logger');
+const util = require('../utils/util');
+const { i18n } = require('inline-i18n');
+const sendEmail = require('../utils/sendEmail');
 const { makePostStatusToParentStr } = require('../utils/web-funcs.browser');
 
 const clearFromDeviceLoginLimitList = async ({ req, userId }) => {
-  if(req.user.idpDeviceLoginLimit && userId >= 0) {
-
+  if (req.user.idpDeviceLoginLimit && userId >= 0) {
     await new Promise((resolve, reject) => {
-      const id = `user sessions for id: ${userId}`
+      const id = `user sessions for id: ${userId}`;
       util.sessionStore.get(id, (err, value) => {
-        if(err) return reject(err)
+        if (err) return reject(err);
 
-        let sessions = []
+        let sessions = [];
         try {
-          sessions = JSON.parse(value) || []
-        } catch(err) { // eslint-disable-line @typescript-eslint/no-unused-vars
+          sessions = JSON.parse(value) || [];
+        } catch {
           return resolve();
         }
 
-        sessions = sessions.filter(session => session !== req.sessionID)
-        util.sessionStore.set(
-          id,
-          JSON.stringify(sessions),
-          (err) => {
-            if(err) return reject(err)
-            resolve()
-          }
-        )
-
-      })
-    })
-
+        sessions = sessions.filter((session) => session !== req.sessionID);
+        util.sessionStore.set(id, JSON.stringify(sessions), (err) => {
+          if (err) return reject(err);
+          resolve();
+        });
+      });
+    });
   }
-}
-module.exports = function (app, passport, authFuncs, ensureAuthenticated, logIn) {
-
-  app.get('/setcookie',
-    (req, res) => {
-      if(!req.query['cookie']) {
-        return res.send({ success: false })
-      }
-
-      req.query['cookie'].split(';').forEach(cookie => {
-        const [ key, value ] = cookie.split(/=/)
-        if(key && value) {
-          res.cookie(
-            key,
-            value,
-            {
-              maxAge: 1000*60*60*24*365*100,
-              sameSite: 'none',
-              secure: 'auto',
-            },
-          )
-        }
-      })
-
-      res.send({ success: true })
+};
+module.exports = function (
+  app,
+  passport,
+  authFuncs,
+  ensureAuthenticated,
+  logIn,
+) {
+  app.get('/setcookie', (req, res) => {
+    if (!req.query['cookie']) {
+      return res.send({ success: false });
     }
-  )
+
+    req.query['cookie'].split(';').forEach((cookie) => {
+      const [key, value] = cookie.split(/=/);
+      if (key && value) {
+        res.cookie(key, value, {
+          maxAge: 1000 * 60 * 60 * 24 * 365 * 100,
+          sameSite: 'none',
+          secure: 'auto',
+        });
+      }
+    });
+
+    res.send({ success: true });
+  });
 
   // app.get('/confirmlogin',
   //   ensureAuthenticated,
@@ -136,26 +128,23 @@ module.exports = function (app, passport, authFuncs, ensureAuthenticated, logIn)
   //   }
   // );
 
-  app.get('/confirmlogin',
-    ensureAuthenticated,
-    (req, res) => {
+  app.get('/confirmlogin', ensureAuthenticated, (req, res) => {
+    const userInfo = {
+      id: req.user.id,
+      fullname: req.user.fullname,
+      email: req.user.email,
+      isAdmin: req.user.isAdmin,
+    };
 
-      const userInfo = {
-        id: req.user.id,
-        fullname: req.user.fullname,
-        email: req.user.email,
-        isAdmin: req.user.isAdmin,
-      }
+    const currentServerTime = util.getUTCTimeStamp();
 
-      const currentServerTime = util.getUTCTimeStamp()
+    const postStatusToParentFunc = makePostStatusToParentStr({
+      cookie: util.getCookie(req),
+      userInfo,
+      currentServerTime,
+    });
 
-      const postStatusToParentFunc = makePostStatusToParentStr({
-        cookie: util.getCookie(req),
-        userInfo,
-        currentServerTime,
-      });
-
-      res.send(`
+    res.send(`
         <html>
           <head>
             <script>
@@ -165,163 +154,153 @@ module.exports = function (app, passport, authFuncs, ensureAuthenticated, logIn)
           <body>
           </body>
         </html>
-      `)
-    }
-  )
+      `);
+  });
 
-  app.get('/confirmlogin-web',
-    ensureAuthenticated,
-    (req, res) => {
+  app.get('/confirmlogin-web', ensureAuthenticated, (req, res) => {
+    const loginInfo = {
+      cookie: util.getCookie(req),
+      userInfo: {
+        id: req.user.id,
+        fullname: req.user.fullname,
+        email: req.user.email,
+        isAdmin: req.user.isAdmin,
+      },
+      currentServerTime: util.getUTCTimeStamp(),
+    };
 
-      const loginInfo = {
-        cookie: util.getCookie(req),
-        userInfo: {
-          id: req.user.id,
-          fullname: req.user.fullname,
-          email: req.user.email,
-          isAdmin: req.user.isAdmin,
-        },
-        currentServerTime: util.getUTCTimeStamp(),
-      }
+    const hashAddOn = req.query.hash
+      ? `&hash=${encodeURIComponent(req.query.hash)}`
+      : ``;
 
-      const hashAddOn = req.query.hash ? `&hash=${encodeURIComponent(req.query.hash)}` : ``
+    res.redirect(
+      `${util.getFrontEndOrigin({ req })}?loginInfo=${encodeURIComponent(JSON.stringify(loginInfo))}${hashAddOn}`,
+    );
+  });
 
-      res.redirect(`${util.getFrontEndOrigin({ req })}?loginInfo=${encodeURIComponent(JSON.stringify(loginInfo))}${hashAddOn}`)
-    }
-  )
-
-  app.get('/login/:idpId',
-    function(req, res, next) {
-      log('Authenticate user', 2)
+  app.get(
+    '/login/:idpId',
+    function (req, res, next) {
+      log('Authenticate user', 2);
       req.query.RelayState = JSON.stringify({
         cookieOverride: util.getCookie(req),
-      })
-      passport.authenticate(req.headers.host, { failureRedirect: '/login/fail' })(req, res, next);
+      });
+      passport.authenticate(req.headers.host, {
+        failureRedirect: '/login/fail',
+      })(req, res, next);
     },
     function (req, res) {
       res.redirect('/');
-    }
+    },
   );
 
-  app.post('/login/:idpId/callback',
-    function(req, res, next) {
+  app.post(
+    '/login/:idpId/callback',
+    function (req, res, next) {
       log('Authenticate user (callback)', 2);
-      passport.authenticate(req.headers.host, { failureRedirect: '/login/fail' })(req, res, next);
+      passport.authenticate(req.headers.host, {
+        failureRedirect: '/login/fail',
+      })(req, res, next);
     },
-    function(req, res) {
+    function (req, res) {
       var loginRedirect = req.session.loginRedirect || '/confirmlogin';
       delete req.session.loginRedirect;
       log(['Post login redirect', loginRedirect]);
       res.redirect(loginRedirect);
-    }
+    },
   );
 
-  app.get('/login/fail',
-    function(req, res) {
-      log('Report login failure');
-      res.status(401).send('Login failed');
+  app.get('/login/fail', function (req, res) {
+    log('Report login failure');
+    res.status(401).send('Login failed');
+  });
+
+  app.get('/logout', async (req, res, next) => {
+    if (req.isAuthenticated()) return next();
+
+    if (req.query.noredirect) {
+      res.send({ success: true, detail: 'was not logged in' });
+    } else {
+      res.redirect(util.getFrontendBaseUrl(req));
     }
-  );
+  });
 
-  app.get('/logout',
-    async (req, res, next) => {
-      if(req.isAuthenticated()) return next()
+  app.get('/logout', ensureAuthenticated, async (req, res, next) => {
+    const userId = req.user.id;
 
-      if(req.query.noredirect) {
-        res.send({ success: true, detail: 'was not logged in' })
-      } else {
-        res.redirect(util.getFrontendBaseUrl(req))
-      }
+    if (authFuncs[req.headers.host]) {
+      authFuncs[req.headers.host].logout(req, res, next);
+    } else {
+      res.redirect(
+        `/logout/callback${req.query.noredirect ? `?noredirect=1` : ``}`,
+      );
     }
-  )
 
-  app.get('/logout',
-    ensureAuthenticated,
-    async (req, res, next) => {
+    await clearFromDeviceLoginLimitList({ req, userId });
 
-      const userId = req.user.id
+    req.logout(); // do this after the redirect (and not just in the callback) since Safari will not send cookies in the iframe so that SLO will not work
 
-      if(authFuncs[req.headers.host]) {
-        authFuncs[req.headers.host].logout(req, res, next);
-      } else {
-        res.redirect(`/logout/callback${req.query.noredirect ? `?noredirect=1` : ``}`);
-      }
+    if (req.headers['x-push-token'] && req.headers['x-push-token'] !== 'none') {
+      // delete push token
 
-      await clearFromDeviceLoginLimitList({ req, userId })
+      const now = util.timestampToMySQLDatetime();
 
-      req.logout()  // do this after the redirect (and not just in the callback) since Safari will not send cookies in the iframe so that SLO will not work
-
-      if(req.headers['x-push-token'] && req.headers['x-push-token'] !== 'none') {
-        // delete push token
-
-        const now = util.timestampToMySQLDatetime()
-
-        await util.runQuery({
-          query: 'UPDATE push_token SET :update WHERE user_id=:userId AND token=:token AND deleted_at IS NULL',
-          vars: {
-            userId,
-            token: req.headers['x-push-token'],
-            update: {
-              deleted_at: now,
-            },
+      await util.runQuery({
+        query:
+          'UPDATE push_token SET :update WHERE user_id=:userId AND token=:token AND deleted_at IS NULL',
+        vars: {
+          userId,
+          token: req.headers['x-push-token'],
+          update: {
+            deleted_at: now,
           },
-          next,
-        })
-      }
+        },
+        next,
+      });
     }
+  });
 
-  )
-
-  app.all(['/logout/callback', '/login'],
-    async (req, res) => {
-      log('Logout callback (will delete cookie)', 2)
-      if(req.user) { await clearFromDeviceLoginLimitList({ req, userId: req.user.id }); }
-      req.logout()  // this will not work on Safari any longer since it will not send cookies in an iframe
-      if(req.query.noredirect) {
-        res.send({ success: true })
-      } else {
-        res.redirect(util.getFrontendBaseUrl(req))
-      }
+  app.all(['/logout/callback', '/login'], async (req, res) => {
+    log('Logout callback (will delete cookie)', 2);
+    if (req.user) {
+      await clearFromDeviceLoginLimitList({ req, userId: req.user.id });
     }
-  )
+    req.logout(); // this will not work on Safari any longer since it will not send cookies in an iframe
+    if (req.query.noredirect) {
+      res.send({ success: true });
+    } else {
+      res.redirect(util.getFrontendBaseUrl(req));
+    }
+  });
 
-  app.get('/urls/:domain',
-    (req, res) => {
-      const { domain } = req.params
+  app.get('/urls/:domain', (req, res) => {
+    const { domain } = req.params;
 
-      const getLink = url => `<a href="${url.replace(/"/g, '&quot;')}">${util.escapeHTML(url)}</a>`
+    const getLink = (url) =>
+      `<a href="${url.replace(/"/g, '&quot;')}">${util.escapeHTML(url)}</a>`;
 
-      res.send(`
+    res.send(`
         <html>
           <head>
           </head>
           <body>
-            ${
-              [
-                'dev',
-                'staging',
-                'beta',
-                'production',
-              ]
-                .map(env => {
-                  const host = util.getDataDomain({ domain, env })
-                  const frontendOrigin = (
-                    util.getFrontEndOrigin({
-                      req: {
-                        headers: {
-                          host,
-                        },
-                        query: {
-                          isBeta: env === 'beta',
-                        },
-                      },
-                      env,
-                    })
-                  )
-                  const backendOrigin = util.getDataOrigin({ domain, env })
+            ${['dev', 'staging', 'beta', 'production']
+              .map((env) => {
+                const host = util.getDataDomain({ domain, env });
+                const frontendOrigin = util.getFrontEndOrigin({
+                  req: {
+                    headers: {
+                      host,
+                    },
+                    query: {
+                      isBeta: env === 'beta',
+                    },
+                  },
+                  env,
+                });
+                const backendOrigin = util.getDataOrigin({ domain, env });
 
-
-                  return `
+                return `
                     <div style="
                       padding: 10px 0;
                     ">
@@ -337,257 +316,290 @@ module.exports = function (app, passport, authFuncs, ensureAuthenticated, logIn)
                         ${getLink(backendOrigin)}
                       </div>
                     </div>
-                  `
-                })
-                .join('\n')
-            }
+                  `;
+              })
+              .join('\n')}
           </body>
         </html>
-      `)
-    }
-  );
+      `);
+  });
 
-  app.get('/Shibboleth.sso/Metadata',
-    function(req, res) {
-      log('Metadata request');
-      res.type('application/xml');
-      res.status(200).send(
+  app.get('/Shibboleth.sso/Metadata', function (req, res) {
+    log('Metadata request');
+    res.type('application/xml');
+    res
+      .status(200)
+      .send(
         authFuncs[req.headers.host]
-         ? authFuncs[req.headers.host].getMetaData()
-         : ""
+          ? authFuncs[req.headers.host].getMetaData()
+          : '',
       );
-    }
-  );
+  });
 
   // passwordless login
-  app.get('/loginwithemail',
-    util.setIdpLang(),
-    async (req, res, next) => {
-      log('Authenticate user via email', 2)
+  app.get('/loginwithemail', util.setIdpLang(), async (req, res, next) => {
+    log('Authenticate user via email', 2);
 
-      const locale = req.idpLang || 'en'
+    const locale = req.idpLang || 'en';
 
-      const loginInfo = {
-        email: req.query.email,
-      }
+    const loginInfo = {
+      email: req.query.email,
+    };
 
-      if(
-        process.env.LOGIN_TEST_EMAIL
-        && process.env.LOGIN_TEST_CODE
-        && process.env.LOGIN_TEST_EMAIL === req.query.email
-      ) {
-        await util.setLoginInfoByAccessCode({ accessCode: process.env.LOGIN_TEST_CODE, loginInfo, next })
-        res.send({ success: true })
-        return
-      }
+    if (
+      process.env.LOGIN_TEST_EMAIL &&
+      process.env.LOGIN_TEST_CODE &&
+      process.env.LOGIN_TEST_EMAIL === req.query.email
+    ) {
+      await util.setLoginInfoByAccessCode({
+        accessCode: process.env.LOGIN_TEST_CODE,
+        loginInfo,
+        next,
+      });
+      res.send({ success: true });
+      return;
+    }
 
-      if(!util.isValidEmail(req.query.email)) {
-        // TODO we should add return here
-        res.status(400).send({
-          success: false,
-          error: 'invalid email',
-        })
-      }
+    // READER-149. Email login exists only for EMAIL and NONE_OR_EMAIL tenants, the two cases in which the app offers
+    // it (Login.js usingEmailLogin, AppMenu's isNoneOrEmail). Without this check the route mails a login code to any
+    // address it is given, for any tenant, including Shibboleth ones. The test login above sends no email, so it
+    // stays open.
+    const idpRows = await util.runQuery({
+      query: 'SELECT authMethod FROM idp WHERE domain=:domain',
+      vars: {
+        domain: util.getIDPDomain({ host: req.hostname || req.headers.host }),
+      },
+      next,
+    });
+    if (!idpRows) return; // runQuery has already passed the error to next()
 
-      let accessCode = util.createAccessCode()
+    const [idp] = idpRows;
+    if (
+      !['EMAIL', 'NONE_OR_EMAIL'].includes(
+        process.env.AUTH_METHOD_OVERRIDE || (idp || {}).authMethod,
+      )
+    ) {
+      log(
+        [
+          'Email login refused: tenant does not use email login',
+          (idp || {}).authMethod,
+        ],
+        2,
+      );
+      res.status(403).send({
+        success: false,
+        error: 'email login not available',
+      });
+      return;
+    }
 
-      // ensure it is unique
-      while(await util.getLoginInfoByAccessCode({ accessCode, next })) {
-        accessCode = util.createAccessCode()
-      }
+    if (!util.isValidEmail(req.query.email)) {
+      res.status(400).send({
+        success: false,
+        error: 'invalid email',
+      });
+      return;
+    }
 
-      await util.setLoginInfoByAccessCode({ accessCode, loginInfo, next })
+    let accessCode = util.createAccessCode();
 
-      // if(process.env.IS_DEV) {
-        log(`Login code: ${accessCode}`)
-      // }
+    // ensure it is unique
+    while (await util.getLoginInfoByAccessCode({ accessCode, next })) {
+      accessCode = util.createAccessCode();
+    }
 
-      try {
+    await util.setLoginInfoByAccessCode({ accessCode, loginInfo, next });
 
-        // send the email
-        await sendEmail({
-          toAddrs: req.query.email,
-          subject: i18n("Login code: {{code}}", { code: accessCode }, { locale }),
-          body: `
+    // The code is a credential for the next 15 minutes, so it is written to the log in development only.
+    if (process.env.IS_DEV) {
+      log(`Login code: ${accessCode}`);
+    }
+
+    try {
+      // send the email
+      await sendEmail({
+        toAddrs: req.query.email,
+        subject: i18n('Login code: {{code}}', { code: accessCode }, { locale }),
+        body: `
             <div style="background: black; border-radius: 5px; line-height: 60px; color: white; text-align: center; font-size: 22px; letter-spacing: 5px;">${accessCode}</div>
-            <p style="text-align: center; margin-top: 30px;">${i18n("Enter this temporary verification code into the app to sign in. If you didn’t try to sign in, you can safely ignore this email.", {}, { locale })}</p>
-            <p style="text-align: center; font-size: 14px; font-weight: bold; margin-bottom: 5px;">${i18n("Note: This code expires in 15 minutes.", {}, { locale })}</p>
+            <p style="text-align: center; margin-top: 30px;">${i18n('Enter this temporary verification code into the app to sign in. If you didn’t try to sign in, you can safely ignore this email.', {}, { locale })}</p>
+            <p style="text-align: center; font-size: 14px; font-weight: bold; margin-bottom: 5px;">${i18n('Note: This code expires in 15 minutes.', {}, { locale })}</p>
           `,
-          skipGreeting: true,
-          skipInnerBG: true,
-          bodyMaxWidth: 400,
-          req,
-        })
+        skipGreeting: true,
+        skipInnerBG: true,
+        bodyMaxWidth: 400,
+        req,
+      });
+    } catch {
+      // sendEmail rejects with a string, and the detail (which names the sending identity) is already logged there
+      res.status(500).send({ success: false, error: 'email send failed' });
+      return;
+    }
 
-      } catch (err) {
-        res.status(500).send({ success: false, error: err.message })
-      }
+    let numSessionsThisWillLogOut = 0;
 
-      let numSessionsThisWillLogOut = 0
-
-      const [ user ] = await util.runQuery({
-        query: `
+    const [user] = await util.runQuery({
+      query: `
           SELECT u.id, i.deviceLoginLimit
           FROM user AS u
             LEFT JOIN idp AS i ON (i.id = u.idp_id)
           WHERE u.email=:email
             AND i.domain=:domain
         `,
-        vars: {
-          email: req.query.email,
-          domain: util.getIDPDomain({ host: req.hostname || req.headers.host }),
-        },
-        next,
-      })
+      vars: {
+        email: req.query.email,
+        domain: util.getIDPDomain({ host: req.hostname || req.headers.host }),
+      },
+      next,
+    });
 
-      if(user && user.deviceLoginLimit) {
-        await new Promise((resolve, reject) => {
-          const id = `user sessions for id: ${user.id}`
-          util.sessionStore.get(id, (err, value) => {
-            if(err) return reject(err)
+    if (user && user.deviceLoginLimit) {
+      await new Promise((resolve, reject) => {
+        const id = `user sessions for id: ${user.id}`;
+        util.sessionStore.get(id, (err, value) => {
+          if (err) return reject(err);
 
-            let sessions = []
-            try {
-              sessions = JSON.parse(value) || []
-              if(sessions.length >= user.deviceLoginLimit) {
-                numSessionsThisWillLogOut = user.deviceLoginLimit
-              }
-            } catch(err) {  // eslint-disable-line @typescript-eslint/no-unused-vars
-              resolve();
+          let sessions = [];
+          try {
+            sessions = JSON.parse(value) || [];
+            if (sessions.length >= user.deviceLoginLimit) {
+              numSessionsThisWillLogOut = user.deviceLoginLimit;
             }
+          } catch {
+            resolve();
+          }
 
-            resolve()
-          })
-        })
-      }
+          resolve();
+        });
+      });
+    }
 
-      res.send({ success: true, numSessionsThisWillLogOut })
-
-    },
-  )
+    res.send({ success: true, numSessionsThisWillLogOut });
+  });
 
   // create access code
-  app.post('/createaccesscode',
-    ensureAuthenticated,
-    async (req, res, next) => {
-      log('Create access code', 2)
+  app.post('/createaccesscode', ensureAuthenticated, async (req, res, next) => {
+    log('Create access code', 2);
 
-      if(!req.user.isAdmin) {
-        log('No permission to create access code', 3)
-        res.status(403).send({ errorType: "no_permission" })
-        return
-      }
+    if (!req.user.isAdmin) {
+      log('No permission to create access code', 3);
+      res.status(403).send({ errorType: 'no_permission' });
+      return;
+    }
 
-      const loginInfo = {
-        email: req.body.email,
-      }
+    const loginInfo = {
+      email: req.body.email,
+    };
 
-      if(!util.isValidEmail(req.body.email)) {
-        // TODO we should add return here
-        res.status(400).send({
-          success: false,
-          error: 'invalid email',
-        })
-      }
+    if (!util.isValidEmail(req.body.email)) {
+      // TODO we should add return here
+      res.status(400).send({
+        success: false,
+        error: 'invalid email',
+      });
+    }
 
-      let accessCode = util.createAccessCode()
+    let accessCode = util.createAccessCode();
 
-      // ensure it is unique
-      while(await util.getLoginInfoByAccessCode({ accessCode, next })) {
-        accessCode = util.createAccessCode()
-      }
+    // ensure it is unique
+    while (await util.getLoginInfoByAccessCode({ accessCode, next })) {
+      accessCode = util.createAccessCode();
+    }
 
-      await util.setLoginInfoByAccessCode({ accessCode, loginInfo, next })
+    await util.setLoginInfoByAccessCode({ accessCode, loginInfo, next });
 
-      res.send({ accessCode })
+    res.send({ accessCode });
+  });
 
-    },
-  )
+  app.get('/loginwithaccesscode', async (req, res, next) => {
+    log(`Authenticate user via email: sent access code: ${req.query.code}`, 2);
 
-  app.get('/loginwithaccesscode',
-    async (req, res, next) => {
-      log(`Authenticate user via email: sent access code: ${req.query.code}`, 2)
+    const { email } =
+      (await util.getLoginInfoByAccessCode({
+        accessCode: req.query.code,
+        destroyAfterGet: true,
+        next,
+      })) || {};
 
-      const { email } = await util.getLoginInfoByAccessCode({ accessCode: req.query.code, destroyAfterGet: true, next }) || {}
+    if (email) {
+      global.connection.query(
+        `SELECT * FROM idp WHERE domain=:domain`,
+        {
+          domain: util.getIDPDomain({ host: req.hostname || req.headers.host }),
+        },
+        async (err2, row2) => {
+          if (err2) return next(err2);
 
-      if(email) {
+          const idp = row2[0];
+          let loginInfo;
 
-        global.connection.query(
-          `SELECT * FROM idp WHERE domain=:domain`,
-          {
-            domain: util.getIDPDomain({ host: req.hostname || req.headers.host }),
-          },
-          async (err2, row2) => {
-            if(err2) return next(err2)
+          if (idp.userInfoEndpoint) {
+            // get user info, if endpoint provided
 
-            const idp = row2[0]
-            let loginInfo
-
-            if(idp.userInfoEndpoint) {
-              // get user info, if endpoint provided
-
-              const [{ user_id_from_idp: idpUserId=email }={}] = await util.runQuery({
-                query: 'SELECT user_id_from_idp FROM `user` WHERE email=:email AND idp_id=:idpId LIMIT 1',
+            const [{ user_id_from_idp: idpUserId = email } = {}] =
+              await util.runQuery({
+                query:
+                  'SELECT user_id_from_idp FROM `user` WHERE email=:email AND idp_id=:idpId LIMIT 1',
                 vars: {
                   email,
                   idpId: idp.id,
                 },
                 next,
-              })
+              });
 
-              loginInfo = await util.getUserInfo({ idp, idpUserId, next, req, res, log })
-
-            } else {
-              // create the user if they do not exist
-              loginInfo = await util.updateUserInfo({
-                log,
-                userInfo: {
-                  idpUserId: email,
-                  email,
-                },
-                idpId: idp.id,
-                updateLastLoginAt: true,
-                next,
-                req,
-              })
-            }
-
-            // log them in
-            await logIn({
-              ...loginInfo,
-              deviceLoginLimit: idp.deviceLoginLimit,
+            loginInfo = await util.getUserInfo({
+              idp,
+              idpUserId,
+              next,
               req,
-              next: err => {
-                if(err) return next(err)
-
-                // send the info back
-                res.send({
-                  success: true,
-                  userInfo: {
-                    id: req.user.id,
-                    fullname: req.user.fullname,
-                    email: req.user.email,
-                    isAdmin: req.user.isAdmin,
-                  },
-                  currentServerTime: Date.now(),
-                  cookie: util.getCookie(req),
-                })
-              }
-            })
-
+              res,
+              log,
+            });
+          } else {
+            // create the user if they do not exist
+            loginInfo = await util.updateUserInfo({
+              log,
+              userInfo: {
+                idpUserId: email,
+                email,
+              },
+              idpId: idp.id,
+              updateLastLoginAt: true,
+              next,
+              req,
+            });
           }
-        )
 
-      } else {
-        // invalid access code
-        res.send({
-          success: false,
-          error: 'invalid access code',
-        })
+          // log them in
+          await logIn({
+            ...loginInfo,
+            deviceLoginLimit: idp.deviceLoginLimit,
+            req,
+            next: (err) => {
+              if (err) return next(err);
 
-      }
-
-    },
-  )
-
-}
+              // send the info back
+              res.send({
+                success: true,
+                userInfo: {
+                  id: req.user.id,
+                  fullname: req.user.fullname,
+                  email: req.user.email,
+                  isAdmin: req.user.isAdmin,
+                },
+                currentServerTime: Date.now(),
+                cookie: util.getCookie(req),
+              });
+            },
+          });
+        },
+      );
+    } else {
+      // invalid access code
+      res.send({
+        success: false,
+        error: 'invalid access code',
+      });
+    }
+  });
+};
