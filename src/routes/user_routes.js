@@ -19,6 +19,34 @@ const cloudFrontPrivateKey = process.env.CLOUDFRONT_PRIVATE_KEY?.replace(
   '\n',
 );
 
+// READER-153. A CloudFront custom policy: everything under a wildcard address, for one day.
+//
+// It is written out and passed to the signer whole, as the v2 code did. Given only a url and a date, the v3 signer
+// writes a canned policy instead (CloudFront-Expires), and CloudFront rebuilds a canned policy from the address that
+// was requested. A signature made over `.../book_<id>/*` then matches no real file, so every request for book
+// content was refused and no book opened. A custom policy travels with the request, as the CloudFront-Policy cookie
+// or as Policy in the query string, and that is the only form in which CloudFront honours a wildcard.
+const getOneDayPolicy = (resource) =>
+  JSON.stringify({
+    Statement: [
+      {
+        Resource: resource,
+        Condition: {
+          DateLessThan: {
+            'AWS:EpochTime': Math.floor(Date.now() / 1000) + 60 * 60 * 24, // in seconds (not ms)
+          },
+        },
+      },
+    ],
+  });
+
+// READER-153. Whether an address may be signed: its only wildcard must be the * that this file puts at the end.
+//
+// In a custom policy CloudFront reads * and ? as wildcards anywhere in the address, and both the id and the host in
+// it come from the request. Without this check `/book_cookies/12*.json` passes the access check as book 12 (MySQL
+// reads the string '12*' as the number 12) and receives a signature that opens every book whose id starts with 12.
+const hasOnlyTheFinalWildcard = (resource) => /^[^*?]+\/\*$/.test(resource);
+
 module.exports = function (
   app,
   ensureAuthenticatedAndCheckIDP,
@@ -700,9 +728,12 @@ module.exports = function (
       }
 
       const { bookId } = req.params;
+      const resource = `${util.getFrontEndOrigin({ req })}/epub_content/book_${bookId}/*`;
 
       // See if they have access to this book
-      const accessInfo = await util.hasAccess({ bookId, req, log, next });
+      const accessInfo =
+        hasOnlyTheFinalWildcard(resource) &&
+        (await util.hasAccess({ bookId, req, log, next }));
 
       if (!accessInfo) {
         log(
@@ -717,15 +748,10 @@ module.exports = function (
 
       // Get the cookie
       try {
-        const dateLessThan = new Date(
-          Date.now() + 60 * 60 * 24 * 1000,
-        ).toISOString();
-
         const cookies = getSignedCookies({
-          url: `${util.getFrontEndOrigin({ req })}/epub_content/book_${bookId}/*`,
           keyPairId: cloudFrontKeyPairId,
           privateKey: cloudFrontPrivateKey,
-          dateLessThan,
+          policy: getOneDayPolicy(resource),
         });
 
         res.send(cookies);
@@ -751,13 +777,16 @@ module.exports = function (
       }
 
       const { classroomUid } = req.params;
+      const url = `${util.getFrontEndOrigin({ req })}/enhanced_assets/${classroomUid}/*`;
 
       // See if they have access to this book
-      const hasAccess = await util.hasClassroomAssetAccess({
-        classroomUid,
-        req,
-        next,
-      });
+      const hasAccess =
+        hasOnlyTheFinalWildcard(url) &&
+        (await util.hasClassroomAssetAccess({
+          classroomUid,
+          req,
+          next,
+        }));
 
       if (!hasAccess) {
         log(
@@ -770,19 +799,13 @@ module.exports = function (
         return;
       }
 
-      const url = `${util.getFrontEndOrigin({ req })}/enhanced_assets/${classroomUid}/*`;
-
       // Get the signed URL
       try {
-        const dateLessThan = new Date(
-          Date.now() + 60 * 60 * 24 * 1000,
-        ).toISOString();
-
         const signedUrl = getSignedUrl({
           url,
           keyPairId: cloudFrontKeyPairId,
           privateKey: cloudFrontPrivateKey,
-          dateLessThan,
+          policy: getOneDayPolicy(url),
         });
 
         res.send({ queryString: `?${signedUrl.split('?')[1]}` });
