@@ -2,6 +2,7 @@ const { Expo } = require('expo-server-sdk')
 const uuidv4 = require('uuid/v4')
 const { i18n } = require("inline-i18n")
 const { log } = require('../src/utils/logger')
+const { sendPushNotifications } = require('../src/utils/sendPushNotifications')
 
 var util = require('../src/utils/util')
 
@@ -153,20 +154,27 @@ module.exports = async ({ next }) => {
 
     log([`Cron: Send out due date reminders (${messages.length} messages from ${pushTokens.length} push tokens)...`, cronRunUid, scheduleDateKey])
 
-    const chunks = expo.chunkPushNotifications(messages)
-  
-    // Spread the load out over time
-    for(let chunk of chunks) {
-      try {
-        log(["Cron: Attempting to send push notifications chunk (due date reminders)...", cronRunUid, scheduleDateKey])
-        await expo.sendPushNotificationsAsync(chunk)
-        log(["Cron: Push notifications chunk (due date reminders) sent successfully", cronRunUid, scheduleDateKey])
-      } catch (error) {
-        log(["Cron: Could not send push notifications (due date reminders)", cronRunUid, scheduleDateKey, error, chunk])
-        // https://docs.expo.io/versions/latest/guides/push-notifications#response-format
-      }
+    // READER-145: splits a chunk that mixes Expo projects instead of losing all of it, and reports dead tokens.
+    const { sent, deadTokens } = await sendPushNotifications({
+      expo,
+      messages,
+      log: (entry, level) => log([`Cron: ${entry[0]} (due date reminders)`, cronRunUid, scheduleDateKey, ...entry.slice(1)], level),
+    })
+    log([`Cron: ${sent} of ${messages.length} due date reminders accepted by Expo`, cronRunUid, scheduleDateKey], sent < messages.length ? 2 : 1)
+
+    // Retire tokens Expo says are dead, so they are not sent to on every run. Soft delete, like logout does.
+    if(deadTokens.length > 0) {
+      await util.runQuery({
+        query: 'UPDATE push_token SET deleted_at=:now WHERE token IN (:deadTokens) AND deleted_at IS NULL',
+        vars: {
+          now,
+          deadTokens,
+        },
+        next,
+      })
+      log([`Cron: Retired ${deadTokens.length} push tokens Expo reported as DeviceNotRegistered`, cronRunUid, scheduleDateKey], 2)
     }
-  
+
     log(["Cron: Done sending out due date reminders for this schedule date key", cronRunUid, scheduleDateKey])
 
   }
