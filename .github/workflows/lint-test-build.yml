@@ -103,14 +103,14 @@ jobs:
       # A second metadata step rather than a second entry in images: above, because the registry host is only known
       # once amazon-ecr-login has run, and a conditionally-empty image name is not something metadata-action accepts.
       # DOCKER_METADATA_SET_OUTPUT_ENV is off here so this does not overwrite the ghcr step's DOCKER_METADATA_OUTPUT_*.
-      - name: Docker meta (ECR ${{ github.ref == "refs/heads/master" && 'production' || 'staging' }})
+      - name: Docker meta (ECR ${{ github.ref == 'refs/heads/master' && 'production' || 'staging' }})
         if: steps.publish.outputs.ecr == 'true'
         id: meta-ecr
         uses: docker/metadata-action@v6
         env:
           DOCKER_METADATA_SET_OUTPUT_ENV: 'false'
         with:
-          images: ${{ steps.ecr.outputs.registry }}/${{ github.ref == "refs/heads/master" && env.ECR_REPOSITORY_PRODUCTION || env.ECR_REPOSITORY_STAGING }}
+          images: ${{ steps.ecr.outputs.registry }}/${{ github.ref == 'refs/heads/master' && env.ECR_REPOSITORY_PRODUCTION || env.ECR_REPOSITORY_STAGING }}
           tags: |
             type=raw,value=latest
             type=sha
