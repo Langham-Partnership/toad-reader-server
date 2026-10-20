@@ -94,7 +94,6 @@ jobs:
             # org.opencontainers.image.vendor=BI Ltd
           sep-annotations: ' --annotation '
           tags: |
-            type=latest,branch=master
             type=edge,branch=dev
             type=ref,event=branch
             type=ref,event=pr
