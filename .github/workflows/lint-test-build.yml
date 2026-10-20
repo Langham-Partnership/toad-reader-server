@@ -51,15 +51,24 @@ jobs:
       # The ECR push has to follow the same rule the --push flag below already follows: only the matrix leg whose Node
       # version matches .nvmrc publishes anything. Without that test both legs would tag the same ECR image, and which
       # of the two landed on :latest would come down to which finished last.
+      # This is also the one place that decides which branch is which environment: the later steps read env,
+      # repository and role from its outputs rather than repeating the test. Choosing the role here does not by itself
+      # separate the environments: that is each role's OIDC trust, which should allow only its own branch (READER-109).
       - name: Decide whether this leg pushes to ECR
         id: publish
         if: steps.buildx.outcome == 'success'
         shell: bash
+        env:
+          ROLE_STAGING: ${{ vars.AWS_ECR_PUSH_ROLE_ARN }}
+          ROLE_PRODUCTION: ${{ vars.AWS_ECR_PUSH_ROLE_ARN_PRODUCTION }}
         run: |
-          if [[ "${{ github.event_name }}" = 'push' ]] \
-            && [[ "${{ github.ref }}" =~ ^refs/heads/(master|dev)$ ]] \
-            && [[ "${{ matrix.node-version }}" -eq "$(cat .nvmrc)" ]]; then
-            echo 'ecr=true' >> $GITHUB_OUTPUT
+          case "${{ github.event_name }}:${{ github.ref }}" in
+            push:refs/heads/master) env=production; repository="$ECR_REPOSITORY_PRODUCTION"; role="$ROLE_PRODUCTION" ;;
+            push:refs/heads/dev)    env=staging;    repository="$ECR_REPOSITORY_STAGING";    role="$ROLE_STAGING" ;;
+            *)                      env='' ;;
+          esac
+          if [[ -n "$env" ]] && [[ "${{ matrix.node-version }}" -eq "$(cat .nvmrc)" ]]; then
+            { echo 'ecr=true'; echo "env=$env"; echo "repository=$repository"; echo "role=$role"; } >> $GITHUB_OUTPUT
           else
             echo 'ecr=false' >> $GITHUB_OUTPUT
           fi
@@ -70,7 +79,7 @@ jobs:
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-toad-reader-server-${{ github.run_id }}
-          role-to-assume: ${{ vars.AWS_ECR_PUSH_ROLE_ARN }}
+          role-to-assume: ${{ steps.publish.outputs.role }}
 
       - name: Log in to Amazon ECR
         id: ecr
@@ -102,14 +111,14 @@ jobs:
       # A second metadata step rather than a second entry in images: above, because the registry host is only known
       # once amazon-ecr-login has run, and a conditionally-empty image name is not something metadata-action accepts.
       # DOCKER_METADATA_SET_OUTPUT_ENV is off here so this does not overwrite the ghcr step's DOCKER_METADATA_OUTPUT_*.
-      - name: Docker meta (ECR ${{ github.ref == 'refs/heads/master' && 'production' || 'staging' }})
+      - name: Docker meta (ECR ${{ steps.publish.outputs.env }})
         if: steps.publish.outputs.ecr == 'true'
         id: meta-ecr
         uses: docker/metadata-action@v6
         env:
           DOCKER_METADATA_SET_OUTPUT_ENV: 'false'
         with:
-          images: ${{ steps.ecr.outputs.registry }}/${{ github.ref == 'refs/heads/master' && env.ECR_REPOSITORY_PRODUCTION || env.ECR_REPOSITORY_STAGING }}
+          images: ${{ steps.ecr.outputs.registry }}/${{ steps.publish.outputs.repository }}
           tags: |
             type=raw,value=latest
             type=sha
