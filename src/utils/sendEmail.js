@@ -2,12 +2,10 @@ const executeSendEmail = require('./executeSendEmail')
 const util = require('./util')
 const { i18n } = require("inline-i18n")
 
-const superAdminEmail = 'no-reply@toadreader.com'
-
 const sendEmail = input => {
 
   if(input instanceof Array) {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const sendEmails = () => {
         if(input.length > 0) {
           const nextEmailInput = input.pop()
@@ -29,7 +27,7 @@ const sendEmail = input => {
     global.connection.query(
       `SELECT * FROM idp WHERE domain=:domain`,
       {
-        domain: req ? util.getIDPDomain(req.headers) : `books.toadreader.com`,
+        domain: req ? util.getIDPDomain({ host: req.hostname || req.headers.host }) : `${process.env.DEFAULT_DOMAIN_TO_QUERY_FOR_EMAIL}`,
       },
       (err, rows) => {
         if(err) {
@@ -57,13 +55,13 @@ const sendEmail = input => {
                     ${util.escapeHTML(domain)}
                   </a>
                 </div>
-              </div> 
-            </div>  
-          </div>  
+              </div>
+            </div>
+          </div>
         `
 
         body = body.replace(
-          /BUTTON\[([^\]]*)\]\(([^\)]*)\)/g,
+          /BUTTON\[([^\]]*)\]\(([^)]*)\)/g,
           `
             <a href="$2">
               <span style="display: inline-block; padding: 8px 16px; background-color: #444; border-radius: 4px; text-transform: uppercase; font-size: 13px; color: white;">
@@ -74,13 +72,13 @@ const sendEmail = input => {
         )
 
       toAddrs = toAddrs instanceof Array ? toAddrs : [toAddrs]
-      fromAddr = fromEmail || superAdminEmail
+      let fromAddr = fromEmail || `${process.env.DEFAULT_FROM_EMAIL}`
       replyToAddrs = replyToAddrs || fromAddr
       replyToAddrs = replyToAddrs instanceof Array ? replyToAddrs : [replyToAddrs]
 
       // remove invalid chars
       const fixAddr = addr => {
-        const [ x, name, email ] = addr.match(/^(.*) <([^>]+)>$/) || []
+        const [ , name, email ] = addr.match(/^(.*) <([^>]+)>$/) || []
         if(!name) return addr
         return `${name.replace(/[^-a-z. ]/gi, ``)} <${email}>`
       }

@@ -1,9 +1,10 @@
+const { log } = require('../utils/logger')
 const WebSocket = require('ws')
 const url = require('url')
 const uuidv4 = require('uuid/v4')
 const util = require('../utils/util');
 
-module.exports = ({ server, sessionParser, log }) => {
+module.exports = ({ server, sessionParser }) => {
 
   const wss = {
     discussion: new WebSocket.Server({
@@ -14,11 +15,11 @@ module.exports = ({ server, sessionParser, log }) => {
   // Set up heartbeat interval for each websocket, clearing any clients who have lost the connection
   Object.keys(wss).map(socketName => {
 
-    heartbeatInterval = setInterval(
+    const heartbeatInterval = setInterval(
       () => {
         wss[socketName].clients.forEach(ws => {
           if(ws.isAlive === false) return ws.terminate()
-      
+
           ws.isAlive = false
           ws.ping(() => {})
         })
@@ -34,7 +35,7 @@ module.exports = ({ server, sessionParser, log }) => {
 
   server.on('upgrade', (req, socket, head) => {
     const { pathname } = url.parse(req.url)
-    const [ x, socketName, cookie, ...params ] = pathname.split('/')
+    const [ , socketName, cookie, ...params ] = pathname.split('/')
 
     log(['Socket attempting to initiate...', socketName])
 
@@ -44,7 +45,7 @@ module.exports = ({ server, sessionParser, log }) => {
     }
 
     req.headers.cookie = cookie
-  
+
     sessionParser(req, {}, () => {
 
       const { userId: id, fullname, idpId } = (req.session.passport || {}).user || {}
@@ -148,7 +149,7 @@ module.exports = ({ server, sessionParser, log }) => {
                   ${until === 'now' ? `` : `
                     AND te.submitted_at<=:until
                   `}
-        
+
                 ORDER BY te.submitted_at DESC, te.uid
 
                 LIMIT :limit

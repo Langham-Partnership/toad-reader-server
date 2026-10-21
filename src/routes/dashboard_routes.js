@@ -1,6 +1,6 @@
 const util = require('../utils/util')
 
-module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
+module.exports = function (app, ensureAuthenticatedAndCheckIDP) {
 
   // get scores
   app.get('/getscores/:classroomUid',
@@ -61,13 +61,13 @@ module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
           if(!quizzesByLoc[spineIdRef]) {
             quizzesByLoc[spineIdRef] = {}
           }
-  
+
           const cfiOrNullStr = cfi || 'NULL'
-  
+
           if(!quizzesByLoc[spineIdRef][cfiOrNullStr]) {
             quizzesByLoc[spineIdRef][cfiOrNullStr] = []
           }
-  
+
           scoresByToolAndUser[uid] = {}
           quizzesByLoc[spineIdRef][cfiOrNullStr].push({
             uid,
@@ -80,7 +80,7 @@ module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
           toolUserCombosAccountedFor[`${uid} ${user_id}`] = true
           scoresByToolAndUser[uid][user_id] = score
         }
-  
+
       })
 
       return res.send({
@@ -227,13 +227,13 @@ module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
           if(!questionsByLoc[spineIdRef]) {
             questionsByLoc[spineIdRef] = {}
           }
-  
+
           const cfiOrNullStr = cfi || 'NULL'
-  
+
           if(!questionsByLoc[spineIdRef][cfiOrNullStr]) {
             questionsByLoc[spineIdRef][cfiOrNullStr] = []
           }
-  
+
           answersByToolAndUser[uid] = {}
           questionsByLoc[spineIdRef][cfiOrNullStr].push({
             uid,
@@ -246,7 +246,7 @@ module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
         if(user_id) {
           answersByToolAndUser[uid][user_id] = text
         }
-  
+
       })
 
       return res.send({
@@ -548,13 +548,13 @@ module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
           if(!pollsByLoc[spineIdRef]) {
             pollsByLoc[spineIdRef] = {}
           }
-  
+
           const cfiOrNullStr = cfi || 'NULL'
-  
+
           if(!pollsByLoc[spineIdRef][cfiOrNullStr]) {
             pollsByLoc[spineIdRef][cfiOrNullStr] = []
           }
-  
+
           userIdsByToolAndChoiceIndex[uid] = Array((data.choices || []).length).fill().map(() => ([]))
           pollsByLoc[spineIdRef][cfiOrNullStr].push({
             uid,
@@ -568,7 +568,7 @@ module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
         if(user_id && choice_index != null) {
           userIdsByToolAndChoiceIndex[uid][parseInt(choice_index, 10)].push(user_id)
         }
-  
+
       })
 
       return res.send({
@@ -580,7 +580,7 @@ module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
   )
 
   // get analytics
-  app.get([ '/getanalytics/:classroomUid', '/getanalytics/:classroomUid/:userId' ], 
+  app.get([ '/getanalytics/:classroomUid', '/getanalytics/:classroomUid/:userId' ],
     ensureAuthenticatedAndCheckIDP,
     async (req, res, next) => {
 
@@ -711,7 +711,7 @@ module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
             AVG(tbl.bestScore) as averageBestScore
 
           FROM (
-            
+
             SELECT
               t.uid,
               t.name,

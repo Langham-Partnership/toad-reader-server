@@ -1,6 +1,7 @@
+const { log } = require('../utils/logger')
 const util = require('../utils/util')
 
-module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
+module.exports = function (app, ensureAuthenticatedAndCheckIDP) {
 
   // get search term suggestions
   app.get(['/searchtermsuggest', '/searchtermsuggest/:bookId'],
@@ -43,7 +44,7 @@ module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
 
               GROUP BY btit.term
               ORDER BY totalCount DESC
-  
+
             LIMIT 10
             OFFSET 0
         `,
@@ -92,7 +93,7 @@ module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
       const mysqlReadyQuery = (
         util.dedup(
           searchStr
-            .replace(/[- .,;–—"“”'‘’`~!()|\\{}\[\]:<>/?*]+/g, " ")
+            .replace(/[- .,;–—"“”'‘’`~!()|\\{}[\]:<>/?*]+/g, " ")
             .replace(/  +/g, ' ')
             .trim()
             .split(' ')
@@ -103,7 +104,7 @@ module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
           .map(w => `AND bti.text REGEXP '(^|${nonWord})${w}($|${nonWord})'`)
           .join(' ')
       )
-  
+
       const results = await util.runQuery({
         query: `
           SELECT

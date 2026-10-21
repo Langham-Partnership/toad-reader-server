@@ -1,11 +1,12 @@
 node_modules
 
 .DS_Store
-.env
+.env*
+!.env-example
+!.env-example.standalone
 .git
 
 .npmrc
-.serverless
 
 # Elastic Beanstalk Files
 .elasticbeanstalk/*
@@ -14,3 +15,6 @@ node_modules
 
 # Temporary files
 tmp_epub_*
+
+# husky
+.husky/_

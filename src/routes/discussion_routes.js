@@ -2,7 +2,7 @@ const uuidv4 = require('uuid/v4')
 
 const util = require('../utils/util');
 
-module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
+module.exports = function (app, ensureAuthenticatedAndCheckIDP) {
 
   app.post('/discussion/getResponses',
     ensureAuthenticatedAndCheckIDP,

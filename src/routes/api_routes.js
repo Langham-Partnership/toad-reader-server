@@ -1,7 +1,8 @@
+const { log } = require('../utils/logger')
 const getShopifyUserInfo = require('../utils/getShopifyUserInfo')
 var util = require('../utils/util')
 
-module.exports = function (app, log) {
+module.exports = function (app) {
 
   app.post('/updateuserinfo',
     util.decodeJWT({ jwtColInIdp: 'userInfoJWT', log }),
@@ -26,7 +27,7 @@ module.exports = function (app, log) {
       const [ idp={} ] = await util.runQuery({
         query: `SELECT * FROM idp WHERE domain=:domain`,
         vars: {
-          domain: util.getIDPDomain(req.headers),
+          domain: util.getIDPDomain({ host: req.hostname || req.headers.host }),
         },
         next,
       })
@@ -78,7 +79,7 @@ module.exports = function (app, log) {
           // next('Bad login.')
           throw err
         }
-  
+
       }
 
       res.send({ success: true })

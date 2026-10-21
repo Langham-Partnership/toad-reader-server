@@ -1,3 +1,4 @@
+const { log } = require('../../utils/logger')
 const util = require('../../utils/util')
 const uuidv4 = require('uuid/v4')
 
@@ -14,7 +15,7 @@ const getErrorObj = error => ({
 })
 
 module.exports = {
-  
+
   addPreQueries: ({
     params,
     classrooms,
@@ -85,7 +86,7 @@ module.exports = {
       let parseError
 
       // compile answers together
-      dbToolEngagements = dbToolEngagements.filter(dbToolEngagement => {
+      dbToolEngagements.forEach(dbToolEngagement => {
         const { uid, toolType, isDiscussion, tool_uid, question_index, choice_index } = dbToolEngagement
         const qIdx = parseInt(question_index)
         const chIdx = parseInt(choice_index)
@@ -101,14 +102,14 @@ module.exports = {
           parseError = `invalid data: cannot patch engagement for toolType ${toolType}`
           return false
         }
-  
+
         if([ 'QUIZ' ].includes(toolType) && toolUidsForToolEngagementsWithoutUids.includes(tool_uid)) {
           parseError = `invalid data: cannot patch engagement of toolType ${toolType} without uid`
           return false
         }
 
         if([ 'QUESTION', 'POLL', 'SKETCH' ].includes(toolType) && !toolUidsForToolEngagementsWithoutUids.includes(tool_uid)) {
-          console.log(`ERR Allowed: invalid data: cannot patch engagement for toolType ${toolType} with uid ${uid}`)
+          log([`ERR Allowed: invalid data: cannot patch engagement for toolType ${toolType} with uid ${uid}`], 3)
           // parseError = `invalid data: cannot patch engagement for toolType ${toolType} with uid ${uid}`
           return false
         }
@@ -168,13 +169,13 @@ module.exports = {
           if(dbToolEngagement && toolEngagement.tool_uid !== dbToolEngagement.tool_uid) {
             return getErrorObj('invalid data: tool engagement associated with wrong tool')
           }
-  
+
           if(!toolEngagement.submitted_at && !toolEngagement._delete) {
             return getErrorObj('invalid data: either submitted_at and/or _delete must be provided when uid is present')
           }
 
           if(dbToolEngagement && !toolEngagement._delete) {
-            console.log('ERR Allowed: invalid data: cannot update a submission toolType (i.e. identified by a uid)', req.headers['user-agent'], req.headers['x-platform'])
+            log(['ERR Allowed: invalid data: cannot update a submission toolType (i.e. identified by a uid)', req.headers['user-agent'], req.headers['x-platform']], 3)
             continue
             // return getErrorObj('invalid data: cannot update a submission toolType (i.e. identified by a uid)')
           }
@@ -199,7 +200,7 @@ module.exports = {
           !Number.isInteger(answer)
           || answer < 0
         ))) {
-          console.log('ERR Allowed: invalid data: tool engagement answers must be an array of whole numbers', req.headers['user-agent'], req.headers['x-platform'])
+          log(['ERR Allowed: invalid data: tool engagement answers must be an array of whole numbers', req.headers['user-agent'], req.headers['x-platform']], 3)
           toolEngagement.answers = toolEngagement.answers.map(answer => (
             (
               !Number.isInteger(answer)
@@ -229,7 +230,7 @@ module.exports = {
 
           const { answers } = toolEngagement
           delete toolEngagement.answers
-  
+
           if(toolEngagement._delete) {  // if _delete is present, then delete
             if(!dbToolEngagement) {
               // shouldn't get here, but just ignore if it does
@@ -280,8 +281,8 @@ module.exports = {
                       choice_index,
                     }],
                   })
-                }           
-              }              
+                }
+              }
             })
 
             if(dbAnswers.length > answers.length) {

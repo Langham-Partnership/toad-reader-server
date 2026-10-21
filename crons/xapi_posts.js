@@ -1,19 +1,20 @@
 const uuidv4 = require('uuid/v4');
 
+const { log } = require('../src/utils/logger')
 const util = require('../src/utils/util');
 
-module.exports = async ({ next }) => {
+module.exports = async () => {
 
   const cronRunUid = uuidv4()
   const currentMySQLDatetime = util.timestampToMySQLDatetime();
 
-  console.log('Cron: xapi posts', cronRunUid);
+  log(['Cron: xapi posts', cronRunUid]);
 
   global.connection.query('SELECT * FROM `idp` WHERE xapiOn=? AND (demo_expires_at IS NULL OR demo_expires_at>?)',
     [1, currentMySQLDatetime],
     function (err, rows) {
       if (err) {
-        console.log(err, cronRunUid);
+        log([err, cronRunUid], 3);
         return;
       }
 
@@ -21,7 +22,7 @@ module.exports = async ({ next }) => {
 
       var markDone = function() {
         if(--leftToDo <= 0) {
-          console.log('Cron: complete', cronRunUid);
+          log(['Cron: complete', cronRunUid]);
         }
       }
 
@@ -34,18 +35,18 @@ module.exports = async ({ next }) => {
 
         // check configuration
         if(!row.xapiEndpoint || !row.xapiUsername || !row.xapiPassword || row.xapiMaxBatchSize < 1) {
-          console.log('Cron: The IDP with id #' + row.id + ' has xapi turned on, but it is misconfigured. Skipping.', cronRunUid);
+          log(['Cron: The IDP with id #' + row.id + ' has xapi turned on, but it is misconfigured. Skipping.', cronRunUid]);
           markDone();
           return;
         }
 
         // get the xapi queue
-        console.log('Cron: Get xapiQueue for idp id #' + row.id, cronRunUid);
+        log(['Cron: Get xapiQueue for idp id #' + row.id, cronRunUid]);
         global.connection.query('SELECT * FROM `xapiQueue` WHERE idp_id=? ORDER BY created_at DESC LIMIT ?',
           [row.id, row.xapiMaxBatchSize],
           function (err, statementRows) {
             if (err) {
-              console.log(err, cronRunUid);
+              log([err, cronRunUid], 3);
               markDone();
               return;
             }
@@ -77,28 +78,30 @@ module.exports = async ({ next }) => {
                     let json = 'No response JSON'
                     try {
                       json = await res.json()
-                    } catch(err) {}
-                    console.log('Cron: Bad xapi post for idp id #' + row.id, json.warnings || json, JSON.stringify(statements), cronRunUid);
+                    } catch {
+                      // Do nothing
+                    }
+                    log(['Cron: Bad xapi post for idp id #' + row.id, json.warnings || json, JSON.stringify(statements), cronRunUid], 2);
                     markDone();
                     return;
                   }
 
-                  console.log(statements.length + ' xapi statement(s) posted successfully for idp id #' + row.id, cronRunUid);
+                  log([statements.length + ' xapi statement(s) posted successfully for idp id #' + row.id, cronRunUid]);
 
                   var statementIds = [];
                   statementRows.forEach(function(statementRow) {
                     statementIds.push(statementRow.id);
                   });
-        
-                  console.log('Cron: Delete successfully sent statements from xapiQueue queue. Ids: ' + statementIds.join(', '), cronRunUid);
-                  global.connection.query('DELETE FROM `xapiQueue` WHERE id IN(?)', [statementIds], function (err, result) {
-                    if (err) console.log(err, cronRunUid);
+
+                  log(['Cron: Delete successfully sent statements from xapiQueue queue. Ids: ' + statementIds.join(', '), cronRunUid]);
+                  global.connection.query('DELETE FROM `xapiQueue` WHERE id IN(?)', [statementIds], function (err) {
+                    if (err) log([err, cronRunUid], 3);
                     markDone();
                   });
-        
+
                 })
-                .catch(function(err) {
-                  console.log('Cron: Xapi post failed for idp id #' + row.id, cronRunUid);
+                .catch(function() {
+                  log(['Cron: Xapi post failed for idp id #' + row.id, cronRunUid]);
                   markDone();
                 })
 
@@ -111,6 +114,6 @@ module.exports = async ({ next }) => {
     }
   );
 
-  console.log("Cron: xapi posts complete", cronRunUid)
+  log(["Cron: xapi posts complete", cronRunUid])
 
 }

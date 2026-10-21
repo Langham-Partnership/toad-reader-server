@@ -1,56 +1,56 @@
-const AWS = require('aws-sdk')
+const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses');
+const { log } = require('./logger');
 
 // SES setup
 const sesConfig = {
-  region: process.env.AWS_REGION || 'us-east-1',
+  region: process.env.SES_AWS_REGION || 'us-east-1',
+};
+if (process.env.SES_ACCESS_KEY_ID && process.env.SES_SECRET_ACCESS_KEY) {
+  sesConfig.credentials = {
+    accessKeyId: process.env.SES_ACCESS_KEY_ID,
+    secretAccessKey: process.env.SES_SECRET_ACCESS_KEY,
+  };
 }
-if(process.env.AWS_KEY && process.env.AWS_SECRET) {
-  sesConfig.accessKeyId = process.env.AWS_KEY
-  sesConfig.secretAccessKey = process.env.AWS_SECRET
-}
-const SES = new AWS.SES(sesConfig)
-
+const sesClient = new SESClient(sesConfig);
 
 const executeSendEmail = ({ queuedEmail, resolve, reject }) => {
+  const { toAddrs, ccAddrs, bccAddrs, fromAddr, replyToAddrs, subject, body } =
+    queuedEmail;
 
-  const { toAddrs, ccAddrs, bccAddrs, fromAddr, replyToAddrs, subject, body } = queuedEmail
+  // READER-149. .then belongs on the promise sesClient.send() returns. It used to sit on the SendEmailCommand object,
+  // which has no then(), so every send threw a TypeError before reaching SES.
+  sesClient
+    .send(
+      new SendEmailCommand({
+        Destination: {
+          ToAddresses: toAddrs,
+          CcAddresses: ccAddrs,
+          BccAddresses: bccAddrs,
+        },
+        Message: {
+          Body: {
+            Html: {
+              Charset: 'UTF-8',
+              Data: body,
+            },
+          },
+          Subject: {
+            Charset: 'UTF-8',
+            Data: subject,
+          },
+        },
+        Source: fromAddr,
+        ReplyToAddresses: replyToAddrs,
+      }),
+    )
+    .then(
+      () => resolve(true),
+      (err) => {
+        // Not the subject or body: for a login or account-deletion email they hold a code that is valid for 15 minutes.
+        log(['Email error: ', err, JSON.stringify({ fromAddr, toAddrs })], 3);
+        reject(err.message || 'email send failed');
+      },
+    );
+};
 
-  SES.sendEmail({
-    Destination: {
-      ToAddresses: toAddrs,
-      CcAddresses: ccAddrs,
-      BccAddresses: bccAddrs,
-    },
-    Message: {
-      Body: {
-        Html: {
-          Charset: "UTF-8", 
-          Data: body,
-        }, 
-      }, 
-      Subject: {
-        Charset: "UTF-8", 
-        Data: subject,
-      }
-    }, 
-    Source: fromAddr, 
-    ReplyToAddresses: replyToAddrs,
-  }, async (err, data) => {
-
-    try {
-
-      if(err) {
-        console.log('Email error: ', err, JSON.stringify(queuedEmail))
-        reject(error.message || 'email send failed')
-      }
-
-      resolve && resolve(true)
-
-    } catch(err) {
-      reject(error.message || 'email send failed')
-    }
-
-  })
-}
-
-module.exports = executeSendEmail
+module.exports = executeSendEmail;

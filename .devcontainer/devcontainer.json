@@ -1,0 +1,24 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/javascript-node
+{
+  "build": {
+    "context": "..",
+    "dockerfile": "Dockerfile"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/aws-cli:1": {},
+    "ghcr.io/devcontainers/features/git:1": {}
+  },
+  "mounts": [
+    "consistency=cached,source=${localEnv:USERPROFILE}/.aws,target=/home/developer/.aws,type=bind" // add ${localEnv:HOME} to source for Linux
+  ],
+  "name": "toad-reader-server",
+  "postStartCommand": {
+    "git-commit-signing": "git config --global --unset gpg.ssh.program",
+    "git-safe-directory": "git config --global --add safe.directory ${containerWorkspaceFolder}"
+  },
+  "runArgs": [
+    "--name",
+    "devcontainer-toad-reader-server"
+  ]
+}

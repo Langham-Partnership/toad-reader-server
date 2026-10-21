@@ -1,6 +1,7 @@
+const { log } = require('../utils/logger')
 const util = require('../utils/util');
 
-module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
+module.exports = function (app, ensureAuthenticatedAndCheckIDP) {
 
   app.post('/connect_to_classroom', ensureAuthenticatedAndCheckIDP, function (req, res, next) {
 
@@ -102,7 +103,7 @@ module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
                 classroom.uid,
                 req.user.id,
               ],
-              (err, results) => {
+              (err) => {
                 if (err) return next(err);
                 res.status(200).send({
                   uid: classroom.uid,
@@ -133,7 +134,7 @@ module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
         req.body.classroomUid,
         req.user.id,
       ],
-      (err, results) => {
+      (err) => {
         if (err) return next(err);
         res.status(200).send();
       }

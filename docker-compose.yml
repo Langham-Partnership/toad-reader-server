@@ -1,0 +1,153 @@
+networks:
+  reader:
+
+services:
+  mysql_init:
+    image: langham-partnership/shibboleth-common:1.0.0-dev
+    depends_on:
+      - common
+    build:
+      context: .
+      dockerfile: Dockerfile.certs
+    env_file: .env.shibboleth
+    environment:
+      JWT_SECRET: ${JWT_SECRET:-k4dtiTVYWZyLuATjoanY8c2c8TjGWnBs}
+    volumes:
+      - ./add-data-to-sql-file.sh:/data/entrypoint.sh:ro
+      - ./seeds.sql:/data/seeds.sql:ro
+      - mysql-init-script:/data/output:rw
+    command: ['/data/entrypoint.sh']
+    pull_policy: build
+
+  mysql:
+    image: mysql:8.0.40
+    depends_on:
+      mysql_init:
+        condition: service_completed_successfully
+    restart: always
+    environment:
+      MYSQL_DATABASE: ${DATABASE_NAME:-ToadReader}
+      MYSQL_PASSWORD: ${DATABASE_PASSWORD}
+      MYSQL_PORT_NUMBER: ${DATABASE_PORT:-3306}
+      MYSQL_RANDOM_ROOT_PASSWORD: 'yes'
+      MYSQL_USER: ${DATABASE_USERNAME}
+    volumes:
+      - mysql-db:/var/lib/mysql
+      - ./db_structure.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - type: volume
+        source: mysql-init-script
+        target: /docker-entrypoint-initdb.d/02-initdata.sql
+        read_only: true
+        volume:
+          nocopy: true
+          subpath: 02-initdata.sql
+    networks:
+      - reader
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost', '-u', 'root']
+      interval: 15s
+      timeout: 5s
+      retries: 6
+
+  reader:
+    image: ghcr.io/langham-partnership/toad-reader-server:dev
+    depends_on:
+      certificate-trust:
+        condition: service_completed_successfully
+        restart: true
+      mysql:
+        condition: service_healthy
+    build:
+      context: .
+      target: development
+    volumes:
+      - ./app.js:/app/app.js
+      - ./src:/app/src
+      - ./scripts:/app/scripts
+      - linux-private-ca-certificates:/usr/local/share/ca-certificates
+    init: true
+    environment:
+      APP_PATH: ${APP_PATH:-/index.html}
+      AUTH_METHOD_OVERRIDE: ${AUTH_METHOD_OVERRIDE:-}
+      CLOUDFRONT_KEY_PAIR_ID: ${CLOUDFRONT_KEY_PAIR_ID:-}
+      CLOUDFRONT_PRIVATE_KEY: ${CLOUDFRONT_PRIVATE_KEY:-}
+      DATABASE_HOSTNAME: mysql
+      DATABASE_NAME: ${DATABASE_NAME:-ToadReader}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD}
+      DATABASE_PORT: ${DATABASE_PORT:-3306}
+      DATABASE_USERNAME: ${DATABASE_USERNAME}
+      DEBUG: ${DEBUG:-}
+      DEFAULT_DOMAIN_TO_QUERY_FOR_EMAIL: ${DEFAULT_DOMAIN_TO_QUERY_FOR_EMAIL:-stg.read.test}
+      DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL}
+      DEFAULT_IDP_DOMAIN: ${DEFAULT_IDP_DOMAIN:-}
+      DEV_NETWORK_IP: ${DEV_NETWORK_IP:-localhost}
+      IPV4_INTERNAL_NETWORK_REGEX: ${IPV4_INTERNAL_NETWORK_REGEX:-}
+      IPV6_INTERNAL_NETWORK_REGEX: ${IPV6_INTERNAL_NETWORK_REGEX:-}
+      IS_DEV: ${IS_DEV:-}
+      LOG_LEVEL: ${LOG_LEVEL:-1}
+      LOGIN_TEST_CODE: ${LOGIN_TEST_CODE:-}
+      LOGIN_TEST_EMAIL: ${LOGIN_TEST_EMAIL:-}
+      MARKETING_DOMAIN: ${MARKETING_DOMAIN}
+      NODE_EXTRA_CA_CERTS: /usr/local/share/ca-certificates/root.crt
+      OVERRIDE_DATABASE_HOSTNAME: ${OVERRIDE_DATABASE_HOSTNAME:-}
+      OVERRIDE_DATABASE_NAME: ${OVERRIDE_DATABASE_NAME:-}
+      OVERRIDE_DATABASE_PASSWORD: ${OVERRIDE_DATABASE_PASSWORD:-}
+      OVERRIDE_DATABASE_PORT: ${OVERRIDE_DATABASE_PORT:-}
+      OVERRIDE_DATABASE_USERNAME: ${OVERRIDE_DATABASE_USERNAME:-}
+      PORT: ${PORT:-8080}
+      QUOTES_DOMAIN: ${QUOTES_DOMAIN:-q.read.test}
+      REQUIRE_HTTPS: ${REQUIRE_HTTPS:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-minio}
+      S3_BUCKET: ${S3_BUCKET:-toadreader}
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-minio123}
+      SES_ACCESS_KEY_ID: ${SES_ACCESS_KEY_ID:-}
+      SES_AWS_REGION: ${SES_AWS_REGION:-us-east-1}
+      SES_SECRET_ACCESS_KEY: ${SES_SECRET_ACCESS_KEY:-}
+      SESSION_SECRET: ${SESSION_SECRET:-secret}
+      SUPPORT_EMAIL: ${SUPPORT_EMAIL}
+      USE_DEVELOPMENT_S3: ${USE_DEVELOPMENT_S3-1}
+      USE_RDS_CERTIFICATE_BUNDLE: ${USE_RDS_CERTIFICATE_BUNDLE:-false}
+      WHITELISTED_EMAILS: ${WHITELISTED_EMAILS:-}
+    networks:
+      - reader
+    restart: always
+
+  minio:
+    image: minio/minio:latest
+    volumes:
+      - minio-data:/data
+    ports:
+      - '9001:9001'
+    networks:
+      - reader
+    environment:
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-minio123}
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-minio}
+    command: server /data --console-address ":9001"
+
+  create_buckets:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    networks:
+      - reader
+    entrypoint: >
+      /bin/sh -c '
+      set -e;
+      sleep 5;
+      /usr/bin/mc alias set s3 ${S3_ENDPOINT:-http://minio:9000} ${S3_ACCESS_KEY_ID:-minio} ${S3_SECRET_ACCESS_KEY:-minio123} --api S3v4;
+      /usr/bin/mc mb --ignore-existing s3/${S3_BUCKET:-toadreader};
+      exit 0;
+      '
+
+include:
+  - path: git@github.com:langham-partnership/ereader-callback.git#main
+    env_file: .env.callback
+  - path: git@github.com:langham-partnership/shibboleth.git#main
+    env_file: .env.shibboleth
+
+volumes:
+  mysql-init-script:
+  mysql-db:
+  minio-data:

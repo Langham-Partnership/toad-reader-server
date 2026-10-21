@@ -1,0 +1,245 @@
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/assets/fonts/montserrat-latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Open Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/assets/fonts/open-sans-latin-400-normal.woff2') format('woff2');
+}
+
+body {
+  font-family: 'Open Sans', sans-serif;
+  text-align: center;
+  color: #333;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.book-image {
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  height: 190px;
+  width: 142px;
+  display: table-cell;
+  vertical-align: middle;
+}
+
+.book-info {
+  font-family: 'Montserrat', sans-serif;
+  display: table-cell;
+  vertical-align: middle;
+  padding-left: 20px;
+}
+
+.quote::before {
+  content: '\201C';
+  font-size: 60px;
+  color: #1c60ab;
+  opacity: 0.4;
+  vertical-align: middle;
+}
+
+.quote::after {
+  content: '\201D';
+  font-size: 60px;
+  color: #1c60ab;
+  opacity: 0.4;
+  top: -13px;
+  left: 10px;
+  vertical-align: middle;
+}
+
+.quote {
+  font-family: 'Montserrat', sans-serif;
+  position: relative;
+  min-height: 50px;
+  padding: 20px;
+  font-size: 28px;
+  line-height: 45px;
+  text-align: center;
+  color: black;
+}
+
+.cont {
+  max-width: 800px;
+  display: inline-block;
+  text-align: left;
+}
+
+.book-title {
+  font-size: 24px;
+  margin: 5px 0;
+}
+
+.book-author {
+  font-size: 14px;
+  color: #555;
+  margin: 0 0 10px;
+}
+
+button {
+  background: #1c60ab;
+  font-family: 'Open Sans', sans-serif;
+  color: #fff;
+  padding: 6px 12px;
+  font-size: 14px;
+  line-height: 1.42857143;
+  -ms-touch-action: manipulation;
+  touch-action: manipulation;
+  cursor: pointer;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  -webkit-transition: all 0.2s ease-in-out;
+  -moz-transition: all 0.2s ease-in-out;
+  -ms-transition: all 0.2s ease-in-out;
+  -o-transition: all 0.2s ease-in-out;
+  transition: all 0.2s ease-in-out;
+}
+
+button:hover {
+  background: #6399d5;
+}
+
+.sharer-heading {
+  font-size: 15px;
+}
+
+.sharer {
+  padding: 20px;
+  border-top: 1px solid #ddd;
+  position: relative;
+}
+
+.book-cont {
+  padding: 20px 20px 40px 20px;
+}
+
+.sharer-note {
+  padding: 10px 0 6px 10px;
+  color: black;
+}
+
+.sharer-name {
+  padding-left: 10px;
+  color: #555;
+  font-size: 12px;
+}
+
+.sharing {
+  text-align: center;
+  padding-bottom: 20px;
+  margin-top: -3px;
+  font-weight: bolder;
+  font-size: 14px;
+}
+
+.sharing > * {
+  margin: 0 4px 0 5px;
+  vertical-align: middle;
+}
+
+.sharer-remove {
+  position: absolute;
+  top: 1px;
+  right: 10px;
+  text-decoration: none;
+  font-size: 21px;
+  padding: 10px;
+  color: #999;
+}
+
+.sharer-remove:hover {
+  color: black;
+}
+
+.copy-url-copied {
+  position: absolute;
+  color: transparent;
+  left: 0;
+  top: -20px;
+  width: 100%;
+  text-align: center;
+  font-weight: bold;
+  -webkit-transition: all 0.4s ease-in-out;
+  -moz-transition: all 0.4s ease-in-out;
+  -ms-transition: all 0.4s ease-in-out;
+  -o-transition: all 0.4s ease-in-out;
+  transition: all 0.4s ease-in-out;
+}
+
+.copy-url {
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  font-size: 11px;
+  line-height: 1;
+  border-radius: 4px;
+}
+
+.copy-url-copied.show {
+  color: black;
+}
+
+.copyel {
+  position: fixed;
+  top: -20px;
+  left: 0;
+  width: 10px;
+  height: 10px;
+}
+
+.twitter-share-button {
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: #000;
+  color: #fff;
+  padding: 0 14px;
+  border-radius: 9999px;
+  text-decoration: none;
+  font-family: 'Open Sans', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+.twitter-share-button::before {
+  content: '';
+  width: 14px;
+  height: 14px;
+  display: inline-block;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  /* X logo (SVG) as data URI */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23fff' d='M18.901 2H22l-6.77 7.74L23.5 22h-6.83l-5.34-7.02L5.2 22H2l7.28-8.32L1 2h7l4.83 6.42L18.9 2Zm-1.2 18h1.89L6.3 3.93H4.28L17.7 20Z'/%3E%3C/svg%3E");
+}
+
+.twitter-share-button:hover {
+  background: #333;
+}
+
+.twitter-share-button:focus-visible,
+.copy-url:focus-visible {
+  outline: 2px solid #6399d5;
+  outline-offset: 2px;
+}

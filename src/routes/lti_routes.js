@@ -3,9 +3,10 @@ const { i18n } = require("inline-i18n")
 const Entities = require('html-entities').AllHtmlEntities
 const entities = new Entities()
 const jwt = require('jsonwebtoken')
+const { log } = require('../utils/logger')
 const oauthSignature = require('oauth-signature')
 
-module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
+module.exports = function (app, ensureAuthenticatedAndCheckIDP) {
 
   // get an LTI launch link
   app.get('/getltilaunchlink/:toolUid',
@@ -61,7 +62,7 @@ module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
       if(!tools[0]) {
         return res.send({ success: false, error: "Cannot find this tool." })
       }
-  
+
       const { name, data, published_at, classroom_uid, classroomName, book_id, lti_configurations, role, version, enhanced_tools_expire_at } = tools[0]
       const defaultClassroomUid = `${req.user.idpId}-${book_id}`
       const isDefaultClassroom = classroom_uid === defaultClassroomUid
@@ -119,7 +120,7 @@ module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
 
       const setKeyAndSecret = ltiConfigurations => {
         JSON.parse(ltiConfigurations || '[]').some(ltiConfiguration => {
-          if(url.replace(/^https?:\/\/([^\/]*).*$/, '$1') === ltiConfiguration.domain) {
+          if(url.replace(/^https?:\/\/([^/]*).*$/, '$1') === ltiConfiguration.domain) {
             key = ltiConfiguration.key
             secret = ltiConfiguration.secret
             return true
@@ -129,7 +130,7 @@ module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
 
       if(fromDefaultClassroom && !isDefaultClassroom) {
         // get key and secret from the default classroom
-        
+
         const [ defaultClassroomRow ] = await util.runQuery({
           query: `
             SELECT c.lti_configurations as defaultLTIConfigurations
@@ -225,7 +226,7 @@ module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
   app.get('/lti/:payload',
     util.decodeJWT({ log, ignoreError: true }),
     util.setIdpLang(),
-    (req, res, next) => {
+    (req, res) => {
 
       const locale = req.idpLang || 'en'
 
@@ -312,5 +313,5 @@ module.exports = function (app, ensureAuthenticatedAndCheckIDP, log) {
 
     }
   )
-  
+
 }
