@@ -5,6 +5,7 @@ on:
 
   push:
     branches:
+      - master
       - dev
 
 permissions:
@@ -14,7 +15,8 @@ permissions:
 
 env:
   AWS_REGION: eu-west-2
-  ECR_REPOSITORY: ereader-staging
+  ECR_REPOSITORY_STAGING: ereader-staging
+  ECR_REPOSITORY_PRODUCTION: ereader-production
 
 jobs:
   build:
@@ -49,15 +51,24 @@ jobs:
       # The ECR push has to follow the same rule the --push flag below already follows: only the matrix leg whose Node
       # version matches .nvmrc publishes anything. Without that test both legs would tag the same ECR image, and which
       # of the two landed on :latest would come down to which finished last.
+      # This is also the one place that decides which branch is which environment: the later steps read env,
+      # repository and role from its outputs rather than repeating the test. Choosing the role here does not by itself
+      # separate the environments: that is each role's OIDC trust, which should allow only its own branch (READER-109).
       - name: Decide whether this leg pushes to ECR
         id: publish
         if: steps.buildx.outcome == 'success'
         shell: bash
+        env:
+          ROLE_STAGING: ${{ vars.AWS_ECR_PUSH_ROLE_ARN }}
+          ROLE_PRODUCTION: ${{ vars.AWS_ECR_PUSH_ROLE_ARN_PRODUCTION }}
         run: |
-          if [ "${{ github.event_name }}" = 'push' ] \
-            && [ "${{ github.ref }}" = 'refs/heads/dev' ] \
-            && [ "${{ matrix.node-version }}" -eq "$(cat .nvmrc)" ]; then
-            echo 'ecr=true' >> $GITHUB_OUTPUT
+          case "${{ github.event_name }}:${{ github.ref }}" in
+            push:refs/heads/master) env=production; repository="$ECR_REPOSITORY_PRODUCTION"; role="$ROLE_PRODUCTION" ;;
+            push:refs/heads/dev)    env=staging;    repository="$ECR_REPOSITORY_STAGING";    role="$ROLE_STAGING" ;;
+            *)                      env='' ;;
+          esac
+          if [[ -n "$env" ]] && [[ "${{ matrix.node-version }}" -eq "$(cat .nvmrc)" ]]; then
+            { echo 'ecr=true'; echo "env=$env"; echo "repository=$repository"; echo "role=$role"; } >> $GITHUB_OUTPUT
           else
             echo 'ecr=false' >> $GITHUB_OUTPUT
           fi
@@ -68,7 +79,7 @@ jobs:
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-toad-reader-server-${{ github.run_id }}
-          role-to-assume: ${{ vars.AWS_ECR_PUSH_ROLE_ARN }}
+          role-to-assume: ${{ steps.publish.outputs.role }}
 
       - name: Log in to Amazon ECR
         id: ecr
@@ -100,14 +111,14 @@ jobs:
       # A second metadata step rather than a second entry in images: above, because the registry host is only known
       # once amazon-ecr-login has run, and a conditionally-empty image name is not something metadata-action accepts.
       # DOCKER_METADATA_SET_OUTPUT_ENV is off here so this does not overwrite the ghcr step's DOCKER_METADATA_OUTPUT_*.
-      - name: Docker meta (ECR staging)
+      - name: Docker meta (ECR ${{ steps.publish.outputs.env }})
         if: steps.publish.outputs.ecr == 'true'
         id: meta-ecr
         uses: docker/metadata-action@v6
         env:
           DOCKER_METADATA_SET_OUTPUT_ENV: 'false'
         with:
-          images: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+          images: ${{ steps.ecr.outputs.registry }}/${{ steps.publish.outputs.repository }}
           tags: |
             type=raw,value=latest
             type=sha
@@ -118,7 +129,7 @@ jobs:
           ECR_TAGS: ${{ steps.meta-ecr.outputs.tags }}
         run: |
           # ghcr tags come from DOCKER_METADATA_OUTPUT_JSON, ECR tags from the step output. ECR_TAGS is empty on every
-          # leg that is not a dev push, and sed drops the blank line that leaves behind.
+          # leg that is not a dev or master push, and sed drops the blank line that leaves behind.
           tags=$( { echo $DOCKER_METADATA_OUTPUT_JSON | jq -r '.tags[]'; printf '%s\n' "$ECR_TAGS"; } | sed '/^$/d' )
           echo "DOCKER_TAGS=$(printf '%s\n' "$tags" | sed 's/^/-t /' | tr '\n' ' ')" >> $GITHUB_ENV
           echo $DOCKER_METADATA_OUTPUT_JSON | jq -r '"REVISION=" + (.labels."org.opencontainers.image.revision")' >> $GITHUB_ENV

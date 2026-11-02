@@ -98,7 +98,7 @@ const setupSuccessfulMocks = (): void => {
   mockUtilFunctions.setLoginInfoByAccessCode.mockResolvedValue(undefined);
   mockUtilFunctions.getUserInfo.mockResolvedValue(createMockUser());
   mockUtilFunctions.updateUserInfo.mockResolvedValue(createMockUser());
-  mockUtilFunctions.runQuery.mockResolvedValue([]);
+  mockQueries('NONE_OR_EMAIL');
   mockUtilFunctions.timestampToMySQLDatetime.mockReturnValue(
     '2022-01-01 00:00:00',
   );
@@ -120,6 +120,21 @@ const setupSuccessfulMocks = (): void => {
   );
   mockSendEmail.mockResolvedValue(undefined);
   mockI18n.mockImplementation((text: string) => text);
+};
+
+// READER-149. /loginwithemail looks up the tenant's authMethod first. That lookup gets a row with the given
+// authMethod (none when authMethod is null); every other runQuery call gets `rows`.
+const mockQueries = (authMethod: string | null, rows: unknown[] = []): void => {
+  mockUtilFunctions.runQuery.mockImplementation(
+    ({ query }: { query: string }) =>
+      Promise.resolve(
+        /SELECT authMethod FROM idp/.test(query)
+          ? authMethod
+            ? [{ authMethod }]
+            : []
+          : rows,
+      ),
+  );
 };
 
 const setupFailureMocks = {
@@ -177,9 +192,7 @@ const setupFailureMocks = {
         callback(null, JSON.stringify(sessions));
       },
     );
-    mockUtilFunctions.runQuery.mockResolvedValue([
-      { id: 1, deviceLoginLimit: limit },
-    ]);
+    mockQueries('NONE_OR_EMAIL', [{ id: 1, deviceLoginLimit: limit }]);
   },
 };
 
@@ -1036,39 +1049,30 @@ describe('auth_routes', () => {
       });
     });
 
-    // In this route, both missing and invalid emails should trigger an early 400 response.
-    // However, since there's no return statement after sending the error, the code continues
-    // and attempts to send another response, causing a "Cannot set headers" error.
-    // Until the route is fixed, we verify only that validation ran (isValidEmail was called)
-    // instead of asserting a 400 status.
-    it.todo('should return 400 status for invalid email');
-    it('should return error for invalid email', async () => {
-      try {
-        await request(app)
-          .get('/loginwithemail')
-          .query({ email: 'invalid-email' });
-      } catch (error) {
-        // Expected due to headers already sent error
-        expect((error as Error).message).toContain('Cannot set headers');
-      }
+    // READER-149 added the missing return after the 400, so these are now plain 400s that send nothing.
+    it('should return 400 for an invalid email and send nothing', async () => {
+      mockUtilFunctions.isValidEmail.mockReturnValue(false);
 
-      // At least verify that isValidEmail was called
+      await request(app)
+        .get('/loginwithemail')
+        .query({ email: 'invalid-email' })
+        .expect(400)
+        .expect({ success: false, error: 'invalid email' });
+
       expect(mockUtilFunctions.isValidEmail).toHaveBeenCalledWith(
         'invalid-email',
       );
+      expect(mockUtilFunctions.setLoginInfoByAccessCode).not.toHaveBeenCalled();
+      expect(mockSendEmail).not.toHaveBeenCalled();
     });
 
-    it.todo('should return 400 status for missing email');
-    it('should handle missing email parameter', async () => {
-      try {
-        await request(app).get('/loginwithemail');
-      } catch (error) {
-        // Expected due to headers already sent error
-        expect((error as Error).message).toContain('Cannot set headers');
-      }
+    it('should return 400 for a missing email and send nothing', async () => {
+      mockUtilFunctions.isValidEmail.mockReturnValue(false);
 
-      // At least verify that isValidEmail was called
+      await request(app).get('/loginwithemail').expect(400);
+
       expect(mockUtilFunctions.isValidEmail).toHaveBeenCalledWith(undefined);
+      expect(mockSendEmail).not.toHaveBeenCalled();
     });
 
     it('should create unique access code and send email', async () => {
@@ -1101,7 +1105,8 @@ describe('auth_routes', () => {
           body: expect.any(String),
         }),
       );
-      expect(mockLog).toHaveBeenCalledWith('Login code: 654321');
+      // Outside development the code is a credential, so it is not logged.
+      expect(mockLog).not.toHaveBeenCalledWith('Login code: 654321');
     });
 
     it('should ensure access code uniqueness by retrying', async () => {
@@ -1116,7 +1121,9 @@ describe('auth_routes', () => {
       expect(mockUtilFunctions.getLoginInfoByAccessCode).toHaveBeenCalledTimes(
         2,
       );
-      expect(mockLog).toHaveBeenCalledWith('Login code: UNIQUE123');
+      expect(mockUtilFunctions.setLoginInfoByAccessCode).toHaveBeenCalledWith(
+        expect.objectContaining({ accessCode: 'UNIQUE123' }),
+      );
     });
 
     it('should check device login limit and return numSessionsThisWillLogOut', async () => {
@@ -1132,9 +1139,7 @@ describe('auth_routes', () => {
 
     it('should handle sessionStore JSON parse errors gracefully', async () => {
       setupFailureMocks.corruptedSessionData();
-      mockUtilFunctions.runQuery.mockResolvedValue([
-        { id: 1, deviceLoginLimit: 2 },
-      ]);
+      mockQueries('NONE_OR_EMAIL', [{ id: 1, deviceLoginLimit: 2 }]);
 
       const response = await request(app)
         .get('/loginwithemail')
@@ -1145,9 +1150,7 @@ describe('auth_routes', () => {
     });
 
     it('should handle sessionStore errors during device limit check', async () => {
-      mockUtilFunctions.runQuery.mockResolvedValue([
-        { id: 1, deviceLoginLimit: 2 },
-      ]);
+      mockQueries('NONE_OR_EMAIL', [{ id: 1, deviceLoginLimit: 2 }]);
       mockUtilFunctions.sessionStore.get.mockImplementation(
         (_id: string, callback: (err: Error | null) => void) => {
           // Don't throw, just resolve with error to test graceful handling
@@ -1175,6 +1178,101 @@ describe('auth_routes', () => {
         { locale: 'en' },
       );
       expect(mockLog).toHaveBeenCalledWith('Authenticate user via email', 2);
+    });
+
+    // ===== READER-149 =====
+    it('refuses a tenant that does not use email login, and sends nothing', async () => {
+      mockQueries('SHIBBOLETH');
+
+      await request(app)
+        .get('/loginwithemail')
+        .query({ email: 'anyone@example.org' })
+        .expect(403)
+        .expect({ success: false, error: 'email login not available' });
+
+      expect(mockUtilFunctions.setLoginInfoByAccessCode).not.toHaveBeenCalled();
+      expect(mockSendEmail).not.toHaveBeenCalled();
+    });
+
+    it('refuses when the tenant row cannot be found', async () => {
+      mockQueries(null);
+
+      await request(app)
+        .get('/loginwithemail')
+        .query({ email: 'anyone@example.org' })
+        .expect(403);
+
+      expect(mockSendEmail).not.toHaveBeenCalled();
+    });
+
+    it('accepts an EMAIL tenant, the other mode in which the app offers email login', async () => {
+      mockQueries('EMAIL');
+
+      await request(app)
+        .get('/loginwithemail')
+        .query({ email: 'user@example.com' })
+        .expect(200);
+
+      expect(mockSendEmail).toHaveBeenCalled();
+    });
+
+    it('still accepts the configured test login on such a tenant, which sends no email', async () => {
+      mockQueries('SHIBBOLETH');
+
+      await request(app)
+        .get('/loginwithemail')
+        .query({ email: 'test@example.com' })
+        .expect(200)
+        .expect({ success: true });
+
+      expect(mockSendEmail).not.toHaveBeenCalled();
+    });
+
+    it('honours AUTH_METHOD_OVERRIDE, as the rest of the server does', async () => {
+      mockQueries('SHIBBOLETH');
+      const saved = process.env.AUTH_METHOD_OVERRIDE;
+      process.env.AUTH_METHOD_OVERRIDE = 'NONE_OR_EMAIL';
+      try {
+        await request(app)
+          .get('/loginwithemail')
+          .query({ email: 'user@example.com' })
+          .expect(200);
+      } finally {
+        if (saved === undefined) delete process.env.AUTH_METHOD_OVERRIDE;
+        else process.env.AUTH_METHOD_OVERRIDE = saved;
+      }
+
+      expect(mockSendEmail).toHaveBeenCalled();
+    });
+
+    it('answers once with a 500 when the email cannot be sent, and stops there', async () => {
+      // The real sendEmail rejects with a string (executeSendEmail), not an Error.
+      mockSendEmail.mockRejectedValue('Email address is not verified.');
+
+      await request(app)
+        .get('/loginwithemail')
+        .query({ email: 'user@example.com' })
+        .expect(500)
+        .expect({ success: false, error: 'email send failed' });
+
+      // Only the tenant lookup ran: the handler did not go on to look up the user and reply a second time.
+      expect(mockUtilFunctions.runQuery).toHaveBeenCalledTimes(1);
+    });
+
+    it('logs the login code in development only', async () => {
+      const saved = process.env.IS_DEV;
+      process.env.IS_DEV = '1';
+      try {
+        await request(app)
+          .get('/loginwithemail')
+          .query({ email: 'user@example.com' })
+          .expect(200);
+      } finally {
+        if (saved === undefined) delete process.env.IS_DEV;
+        else process.env.IS_DEV = saved;
+      }
+
+      expect(mockLog).toHaveBeenCalledWith('Login code: 123456');
     });
   });
 

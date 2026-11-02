@@ -17,35 +17,40 @@ const executeSendEmail = ({ queuedEmail, resolve, reject }) => {
   const { toAddrs, ccAddrs, bccAddrs, fromAddr, replyToAddrs, subject, body } =
     queuedEmail;
 
-  sesClient.send(
-    new SendEmailCommand({
-      Destination: {
-        ToAddresses: toAddrs,
-        CcAddresses: ccAddrs,
-        BccAddresses: bccAddrs,
-      },
-      Message: {
-        Body: {
-          Html: {
+  // READER-149. .then belongs on the promise sesClient.send() returns. It used to sit on the SendEmailCommand object,
+  // which has no then(), so every send threw a TypeError before reaching SES.
+  sesClient
+    .send(
+      new SendEmailCommand({
+        Destination: {
+          ToAddresses: toAddrs,
+          CcAddresses: ccAddrs,
+          BccAddresses: bccAddrs,
+        },
+        Message: {
+          Body: {
+            Html: {
+              Charset: 'UTF-8',
+              Data: body,
+            },
+          },
+          Subject: {
             Charset: 'UTF-8',
-            Data: body,
+            Data: subject,
           },
         },
-        Subject: {
-          Charset: 'UTF-8',
-          Data: subject,
-        },
-      },
-      Source: fromAddr,
-      ReplyToAddresses: replyToAddrs,
-    }).then(
+        Source: fromAddr,
+        ReplyToAddresses: replyToAddrs,
+      }),
+    )
+    .then(
       () => resolve(true),
       (err) => {
-        log(['Email error: ', err, JSON.stringify(queuedEmail)], 3);
+        // Not the subject or body: for a login or account-deletion email they hold a code that is valid for 15 minutes.
+        log(['Email error: ', err, JSON.stringify({ fromAddr, toAddrs })], 3);
         reject(err.message || 'email send failed');
       },
-    ),
-  );
+    );
 };
 
 module.exports = executeSendEmail;
