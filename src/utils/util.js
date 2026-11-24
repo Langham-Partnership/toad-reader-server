@@ -1634,19 +1634,21 @@ const util = {
         // },
         vars,
         (err, result) => {
-          if (err) {
+          if (err || logLevel <= 1) {
             // Statement template and error codes only. Bound values, err.sql
             // and result rows carry user data and tenant secrets.
             Sentry.addBreadcrumb({
               type: 'query',
               category: 'query',
               message: query,
-              level: 'error',
-              data: {
-                'db.error.code': err.code,
-                'db.error.errno': err.errno,
-                'db.error.sqlState': err.sqlState,
-              },
+              level: err ? 'error' : 'info',
+              data: err
+                ? {
+                    'db.error.code': err.code,
+                    'db.error.errno': err.errno,
+                    'db.error.sqlState': err.sqlState,
+                  }
+                : undefined,
             });
           }
           if (err) {
