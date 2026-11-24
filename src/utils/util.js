@@ -1634,18 +1634,18 @@ const util = {
         // },
         vars,
         (err, result) => {
-          if (err || logLevel <= 1) {
-            // verbose
+          if (err) {
+            // Statement template and error codes only. Bound values, err.sql
+            // and result rows carry user data and tenant secrets.
             Sentry.addBreadcrumb({
               type: 'query',
               category: 'query',
               message: query,
-              level: 'info',
+              level: 'error',
               data: {
-                'db.statement': query,
-                'db.params': vars,
-                'db.error': err,
-                'db.result': result,
+                'db.error.code': err.code,
+                'db.error.errno': err.errno,
+                'db.error.sqlState': err.sqlState,
               },
             });
           }
